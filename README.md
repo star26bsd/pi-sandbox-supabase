@@ -1,6 +1,8 @@
 # pi-sandbox-supabase
 
-Unsandboxed `npx supabase` CLI tool for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent). Gives pi an escape hatch from its sandbox to interact with the Supabase CLI, including Docker-based local database operations.
+Unsandboxed `npx supabase` CLI tool for the [pi coding agent](https://github.com/earendil-works/pi). Gives pi an escape hatch from its sandbox to interact with the Supabase CLI, including Docker-based local database operations.
+
+> **Related**: [carderne/pi-sandbox](https://github.com/carderne/pi-sandbox) — general-purpose sandbox extension for pi
 
 ## What it provides
 
@@ -24,7 +26,7 @@ Or install via git:
 
 ```bash
 cd your-project
-pi install git:github.com/your-org/pi-sandbox-supabase
+pi install git:github.com/star26bsd/pi-sandbox-supabase
 ```
 
 2. Install dependencies:
@@ -46,7 +48,7 @@ cp .pi/extensions/supabase-bash/agents/supabase.md .pi/agents/
 ### Option B: Global (available in all projects)
 
 ```bash
-pi install git:github.com/your-org/pi-sandbox-supabase --global
+pi install git:github.com/star26bsd/pi-sandbox-supabase --global
 ```
 
 ### Option C: No install (one-shot test)
