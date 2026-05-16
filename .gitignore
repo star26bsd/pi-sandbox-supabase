@@ -26,3 +26,6 @@ Thumbs.db
 .zprofile
 .zshrc
 .mcp.json
+
+.idea
+.vscode

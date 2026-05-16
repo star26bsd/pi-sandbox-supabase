@@ -35,6 +35,7 @@ import {
   checkDestructive,
   defaultState,
 } from "./destructive-gate.js";
+import { checkObsolete } from "./obsolete-gate.js";
 import { runSupabaseBash } from "./tool.js";
 
 /* ── TypeBox lazy import ────────────────────────────────────────── */
@@ -92,6 +93,10 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
           isError: true,
         };
       }
+
+      // Check obsolete commands before spawn — no process created for obsolete commands
+      const obsoleteRefusal = checkObsolete(params.args);
+      if (obsoleteRefusal) return obsoleteRefusal;
 
       // Check destructive ops before spawn — no process created for blocked commands
       const projectRoot = typeof ctx === "object" && ctx !== null && "cwd" in ctx
