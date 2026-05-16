@@ -9,6 +9,24 @@
 import { spawn } from "node:child_process";
 import type { AgentToolResult, ResolvedOptions } from "./types.js";
 
+/* ── Output filtering ─────────────────────────────────────────────── */
+
+function filterOutputNag(chunk: string, partialLine: string[]): string {
+  const buffer = [...partialLine];
+  const allText = buffer.length > 0 ? buffer.join("") + chunk : chunk;
+  const lines = allText.split(/\r?\n/);
+  const lastSegment = lines.pop()!;
+  const filtered = lines.filter((line) => {
+    if (/^A new version of Supabase CLI is available:/i.test(line)) return false;
+    if (/^We recommend updating regularly for new features/i.test(line)) return false;
+    return true;
+  });
+  if (lastSegment.length > 0 && !allText.endsWith("\n")) {
+    partialLine.push(lastSegment);
+  }
+  return filtered.join("\n");
+}
+
 /** Optional abort signal and streaming update callback. */
 export interface RunContext {
   signal: AbortSignal | undefined;
@@ -66,15 +84,20 @@ export function runSupabaseBash(
     }, timeout * 1000);
   }
 
+  const stdoutPartial: string[] = [];
+  const stderrPartial: string[] = [];
+
   child.stdout?.on("data", (chunk) => {
     const text = chunk.toString();
-    outputChunks.push(text);
-    onUpdate(text);
+    const filtered = filterOutputNag(text, stdoutPartial);
+    outputChunks.push(filtered);
+    onUpdate(filtered);
   });
   child.stderr?.on("data", (chunk) => {
     const text = chunk.toString();
-    outputChunks.push(text);
-    onUpdate(text);
+    const filtered = filterOutputNag(text, stderrPartial);
+    outputChunks.push(filtered);
+    onUpdate(filtered);
   });
 
   child.on("error", (err) => {
