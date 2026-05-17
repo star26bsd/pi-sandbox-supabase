@@ -30,7 +30,7 @@ function filterOutputNag(chunk: string, partialLine: string[]): string {
 /** Optional abort signal and streaming update callback. */
 export interface RunContext {
   signal: AbortSignal | undefined;
-  onUpdate: (chunk: string) => void;
+  onUpdate: (partialResult: AgentToolResult) => void;
 }
 
 /**
@@ -91,20 +91,20 @@ export function runSupabaseBash(
     const text = chunk.toString();
     const filtered = filterOutputNag(text, stdoutPartial);
     outputChunks.push(filtered);
-    onUpdate(filtered);
+    onUpdate({ content: [{ type: "text", text: outputChunks.join("") }] });
   });
   child.stderr?.on("data", (chunk) => {
     const text = chunk.toString();
     const filtered = filterOutputNag(text, stderrPartial);
     outputChunks.push(filtered);
-    onUpdate(filtered);
+    onUpdate({ content: [{ type: "text", text: outputChunks.join("") }] });
   });
 
   child.on("error", (err) => {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     const msg = `Error: ${err.message}\n`;
     outputChunks.push(msg);
-    onUpdate(msg);
+    onUpdate({ content: [{ type: "text", text: outputChunks.join("") }], isError: true });
   });
 
   child.on("close", () => {

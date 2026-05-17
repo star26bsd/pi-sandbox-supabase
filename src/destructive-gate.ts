@@ -99,29 +99,75 @@ export function writeState(state: StateFile, statePath: string): void {
  *   - `stop`
  *   - `db schema declarative sync ... --apply`
  */
+export function canonicalizeArgsForApproval(args: string[]): string[] {
+  const canonical: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "--yes") continue;
+    if (arg === "--agent") {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--agent=")) continue;
+
+    canonical.push(arg);
+  }
+
+  return canonical;
+}
+
+function hasAgentFlag(args: string[]): boolean {
+  return args.some((arg) => arg === "--agent" || arg.startsWith("--agent="));
+}
+
+function hasYesFlag(args: string[]): boolean {
+  return args.includes("--yes");
+}
+
+export function withAutomationFlags(
+  args: string[],
+  customPatterns: Array<(args: string[]) => boolean>,
+): string[] {
+  const result = [...args];
+
+  // Supabase CLI global flag: make agent/non-interactive context explicit and
+  // avoid repeated CLI agent-detection chatter. Keep user-provided values.
+  if (!hasAgentFlag(result)) result.push("--agent", "yes");
+
+  // If the command itself is destructive, the project-level destructive gate is
+  // the confirmation boundary. Add Supabase's own --yes once so the approved
+  // command does not prompt again or produce a second approval request.
+  if (isDestructive(result, customPatterns) && !hasYesFlag(result)) result.push("--yes");
+
+  return result;
+}
+
 export function isDestructive(args: string[], customPatterns: Array<(args: string[]) => boolean>): boolean {
-  if (!args || args.length === 0) return false;
+  const commandArgs = canonicalizeArgsForApproval(args);
+  if (!commandArgs || commandArgs.length === 0) return false;
 
   // Check for "db reset"
-  if (args[0] === "db" && args[1] === "reset") return true;
+  if (commandArgs[0] === "db" && commandArgs[1] === "reset") return true;
 
   // Check for "stop"
-  if (args[0] === "stop") return true;
+  if (commandArgs[0] === "stop") return true;
 
   // Check for "db schema declarative sync --apply"
   if (
-    args[0] === "db" &&
-    args[1] === "schema" &&
-    args[2] === "declarative" &&
-    args.includes("sync") &&
-    args.includes("--apply")
+    commandArgs[0] === "db" &&
+    commandArgs[1] === "schema" &&
+    commandArgs[2] === "declarative" &&
+    commandArgs.includes("sync") &&
+    commandArgs.includes("--apply")
   ) {
     return true;
   }
 
   // Check custom patterns
   for (const pattern of customPatterns) {
-    if (pattern(args)) return true;
+    if (pattern(commandArgs)) return true;
   }
 
   return false;
@@ -166,6 +212,7 @@ export function checkDestructive(
   const statePath = join(cwd, options.stateFile);
   const state = readState(statePath);
   const command = args.join(" ");
+  const approvalArgs = canonicalizeArgsForApproval(args);
 
   // Mode: yes — allow immediately
   if (state.mode === "yes") return undefined;
@@ -190,11 +237,11 @@ export function checkDestructive(
 
   // Mode: ask — check for approval
   const existingRequest = state.pendingRequests.find(
-    (r) => JSON.stringify(r.args) === JSON.stringify(args),
+    (r) => JSON.stringify(canonicalizeArgsForApproval(r.args)) === JSON.stringify(approvalArgs),
   );
 
   const matchingApproval = state.approvals.find(
-    (a) => JSON.stringify(a.args) === JSON.stringify(args),
+    (a) => JSON.stringify(canonicalizeArgsForApproval(a.args)) === JSON.stringify(approvalArgs),
   );
 
   if (existingRequest) {
@@ -239,7 +286,7 @@ export function checkDestructive(
   const newRequest: PendingRequest = {
     id,
     command,
-    args,
+    args: approvalArgs,
     createdTstamp: new Date().toISOString(),
     parentQuestion,
   };

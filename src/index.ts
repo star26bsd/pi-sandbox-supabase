@@ -20,20 +20,20 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type {
   StateFile,
+  PendingRequest,
   ApprovalRecord,
   SupabaseBashOptions,
   ResolvedOptions,
-  ExtensionContext,
   PiUI,
+  AgentToolResult,
 } from "./types.js";
 import {
   readState,
   writeState,
   readConfigMode,
-  formatModeIndicator,
   updateStatusBar,
   checkDestructive,
-  defaultState,
+  withAutomationFlags,
 } from "./destructive-gate.js";
 import { checkObsolete } from "./obsolete-gate.js";
 import { runSupabaseBash } from "./tool.js";
@@ -84,7 +84,7 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
       _id: string,
       params: { args: string[]; timeout?: number },
       signal: AbortSignal | undefined,
-      onUpdate: (chunk: string) => void,
+      onUpdate: (partialResult: AgentToolResult) => void,
       ctx: unknown,
     ) {
       if (!params.args) {
@@ -94,19 +94,21 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
         };
       }
 
+      const effectiveArgs = withAutomationFlags(params.args, options.customDestructivePatterns);
+
       // Check obsolete commands before spawn — no process created for obsolete commands
-      const obsoleteRefusal = checkObsolete(params.args);
+      const obsoleteRefusal = checkObsolete(effectiveArgs);
       if (obsoleteRefusal) return obsoleteRefusal;
 
       // Check destructive ops before spawn — no process created for blocked commands
       const projectRoot = typeof ctx === "object" && ctx !== null && "cwd" in ctx
         ? (ctx as { cwd: string }).cwd
         : process.cwd();
-      const refusal = checkDestructive(params.args, options, projectRoot);
+      const refusal = checkDestructive(effectiveArgs, options, projectRoot);
       if (refusal) return refusal;
 
       return await runSupabaseBash(
-        { args: params.args, timeout: params.timeout },
+        { args: effectiveArgs, timeout: params.timeout },
         { signal, onUpdate },
         options,
       );
@@ -166,6 +168,14 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
       if (subcmd === "approve") {
         const state = readState(statePath);
         const requestId = args[1];
+        const continueAfterApproval = (req: PendingRequest) => {
+          const message = `Approved destructive DB request ${req.id} (${req.command}). Continue by rerunning the approved command now.`;
+          if (typeof (ctx as any).isIdle === "function" && !(ctx as any).isIdle()) {
+            pi.sendUserMessage(message, { deliverAs: "followUp" });
+            return;
+          }
+          pi.sendUserMessage(message);
+        };
 
         if (requestId) {
           const req = state.pendingRequests.find((r) => r.id === requestId);
@@ -187,6 +197,7 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
           writeState(newState, statePath);
           updateStatusBar(newState, ctx.ui);
           ctx.ui.notify(`Approved: ${req.command}`, "info");
+          continueAfterApproval(req);
           return;
         }
 
@@ -209,6 +220,7 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
         writeState(newState, statePath);
         updateStatusBar(newState, ctx.ui);
         ctx.ui.notify(`Approved: ${req.command}`, "info");
+        continueAfterApproval(req);
         return;
       }
 

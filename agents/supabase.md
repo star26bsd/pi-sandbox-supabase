@@ -36,7 +36,7 @@ The `supabase_bash` tool enforces a destructive-operations gate deterministicall
 When the tool returns this action, you MUST:
 1. Report `details.requestId`, `details.command`, and `details.parentQuestion` to the parent
 2. Stop — do NOT retry the command yourself
-3. The parent will approve via `/destructive-db approve <requestId>` and then rerun the task
+3. The parent will approve via `/destructive-db approve <requestId>`; the slash command queues a follow-up so the active agent can continue and rerun the approved command
 
 ### Destructive Blocked (`details.action === "blocked"`)
 

@@ -6,8 +6,8 @@ Unsandboxed `npx supabase` CLI tool for the [pi coding agent](https://github.com
 
 ## What it provides
 
-- **`supabase_bash` tool** — spawns `npx supabase` commands outside pi's sandbox, using `child_process.spawn` with `shell: false` for injection-safe argument passing
-- **`/destructive-db` slash command** — manage destructive-operation modes (`yes`/`no`/`ask`) and approve pending operations
+- **`supabase_bash` tool** — spawns `npx supabase` commands outside pi's sandbox, using `child_process.spawn` with `shell: false` for injection-safe argument passing; automatically appends `--agent yes`, and appends `--yes` to destructive commands after project-level gating
+- **`/destructive-db` slash command** — manage destructive-operation modes (`yes`/`no`/`ask`) and approve pending operations; approval queues a follow-up so the active agent can continue without an extra manual “proceed”
 - **File-backed destructive-operations gate** — all destructive commands (`db reset`, `stop`, `declarative sync --apply`) are gated through a state machine persisted to disk, so subagents share the same gate state as the parent session
 - **Status bar indicator** — shows current DB mode (e.g. `DB: ask (2 pending)`)
 - **`supabase` subagent config** — optional pi agent definition with read/grep/supabase_bash tools for PG-Delta workflows
@@ -124,8 +124,8 @@ supabase_bash({ args: ["db", "reset", "--local"], timeout: 300 })
 /destructive-db no           # Block all destructive commands
 /destructive-db ask          # Require approval (default)
 /destructive-db status       # Show current state
-/destructive-db approve      # Approve oldest pending request
-/destructive-db approve <id> # Approve specific request
+/destructive-db approve      # Approve oldest pending request and queue agent follow-up
+/destructive-db approve <id> # Approve specific request and queue agent follow-up
 /destructive-db clear        # Clear all pending requests and approvals
 ```
 
@@ -143,7 +143,8 @@ Commands that trigger the gate:
 1. Agent tries to run a destructive command
 2. Tool returns `action: "approval_required"` with a `requestId` and `parentQuestion`
 3. You run `/destructive-db approve <requestId>` (or just `/destructive-db approve`)
-4. Agent re-runs the command — it proceeds
+4. The slash command queues a follow-up telling the active agent to rerun the approved command
+5. Agent re-runs the command — it proceeds
 
 **In `yes` mode:** destructive commands run immediately.
 
@@ -157,7 +158,7 @@ The included `supabase.md` agent config defines a read-only subagent with `read`
 - Generating migrations via `npx supabase db schema declarative sync`
 - Inspecting schema files with `read` and `grep`
 
-The subagent handles the destructive-ops protocol: when a command requires approval, it reports the request ID and parent question to you, and waits for you to approve before retrying.
+The subagent handles the destructive-ops protocol: when a command requires approval, it reports the request ID and parent question to you, and waits for you to approve. Approval queues a follow-up so the active agent can retry without an extra manual “proceed”.
 
 ## State file
 

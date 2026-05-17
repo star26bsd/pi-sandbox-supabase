@@ -9,6 +9,8 @@ import { existsSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { PendingRequest, ApprovalRecord, ResolvedOptions } from "../types.js";
 import {
+  canonicalizeArgsForApproval,
+  withAutomationFlags,
   isDestructive,
   checkDestructive,
   readState,
@@ -70,10 +72,52 @@ describe("isDestructive", () => {
     assert.ok(!isDestructive([], []));
   });
 
-  test("custom destructive patterns are checked", () => {
+  test("custom destructive patterns are checked against canonical args", () => {
     const custom = [(args: string[]) => args.includes("--force")];
-    assert.ok(isDestructive(["migrate", "--force"], custom));
+    assert.ok(isDestructive(["migrate", "--force", "--agent", "yes", "--yes"], custom));
     assert.ok(!isDestructive(["migrate"], custom));
+  });
+
+  test("automation flags do not change destructive detection", () => {
+    assert.ok(isDestructive(["db", "reset", "--local", "--agent", "yes", "--yes"], []));
+    assert.ok(!isDestructive(["status", "--agent", "yes"], []));
+  });
+});
+
+/* ── automation flags / approval canonicalization ───────────────── */
+
+describe("automation flags and approval canonicalization", () => {
+  test("canonicalizeArgsForApproval removes --yes and --agent forms", () => {
+    assert.deepEqual(
+      canonicalizeArgsForApproval(["db", "reset", "--local", "--yes", "--agent", "yes", "--debug"]),
+      ["db", "reset", "--local", "--debug"],
+    );
+    assert.deepEqual(
+      canonicalizeArgsForApproval(["status", "--agent=yes"]),
+      ["status"],
+    );
+  });
+
+  test("withAutomationFlags adds --agent yes to all commands", () => {
+    assert.deepEqual(withAutomationFlags(["status"], []), ["status", "--agent", "yes"]);
+  });
+
+  test("withAutomationFlags adds --yes only for destructive commands", () => {
+    assert.deepEqual(
+      withAutomationFlags(["db", "reset", "--local"], []),
+      ["db", "reset", "--local", "--agent", "yes", "--yes"],
+    );
+    assert.deepEqual(
+      withAutomationFlags(["db", "schema", "declarative", "sync"], []),
+      ["db", "schema", "declarative", "sync", "--agent", "yes"],
+    );
+  });
+
+  test("withAutomationFlags preserves explicit automation flags", () => {
+    assert.deepEqual(
+      withAutomationFlags(["db", "reset", "--local", "--agent", "no", "--yes"], []),
+      ["db", "reset", "--local", "--agent", "no", "--yes"],
+    );
   });
 });
 
@@ -369,11 +413,30 @@ describe("checkDestructive — file-backed mode enforcement", () => {
     assert.deepEqual(state.pendingRequests[0].args, ["db", "reset"]);
   });
 
+  test("ask mode: stores canonical request args without automation flags", () => {
+    setupState("ask");
+    checkDestructive(["db", "reset", "--local", "--agent", "yes", "--yes"], opts, testDir);
+    const state = readState(statePath);
+    assert.equal(state.pendingRequests.length, 1);
+    assert.deepEqual(state.pendingRequests[0].args, ["db", "reset", "--local"]);
+  });
+
   test("ask mode: reuses existing pending request (same args)", () => {
     setupState("ask");
     const result1 = checkDestructive(["db", "reset"], opts, testDir);
     const details1 = result1?.details as any;
     const result2 = checkDestructive(["db", "reset"], opts, testDir);
+    const details2 = result2?.details as any;
+    assert.equal(details1?.requestId, details2?.requestId);
+    const state = readState(statePath);
+    assert.equal(state.pendingRequests.length, 1);
+  });
+
+  test("ask mode: reuses existing pending request across automation flag variants", () => {
+    setupState("ask");
+    const result1 = checkDestructive(["db", "reset", "--local"], opts, testDir);
+    const details1 = result1?.details as any;
+    const result2 = checkDestructive(["db", "reset", "--local", "--yes", "--agent", "yes"], opts, testDir);
     const details2 = result2?.details as any;
     assert.equal(details1?.requestId, details2?.requestId);
     const state = readState(statePath);
@@ -402,6 +465,17 @@ describe("checkDestructive — file-backed mode enforcement", () => {
     }]);
     const result = checkDestructive(["stop"], opts, testDir);
     assert.ok(!result, "should allow with approval even without prior request");
+  });
+
+  test("ask mode: canonical approval matches command with automation flags", () => {
+    setupState("ask", [], [{
+      id: "test-approval-canonical",
+      command: "db reset --local",
+      args: ["db", "reset", "--local"],
+      approvedTstamp: "2025-01-01T00:00:00.000Z",
+    }]);
+    const result = checkDestructive(["db", "reset", "--local", "--yes", "--agent", "yes"], opts, testDir);
+    assert.ok(!result, "should allow with matching canonical approval");
   });
 
   test("yes mode: allows destructive immediately", () => {

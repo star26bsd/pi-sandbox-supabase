@@ -4,7 +4,10 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSpawnArgs, describeCommand } from "../tool.js";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildSpawnArgs, describeCommand, runSupabaseBash } from "../tool.js";
 import type { ResolvedOptions } from "../types.js";
 
 const defaults: ResolvedOptions = {
@@ -95,5 +98,34 @@ describe("input validation", () => {
       () => buildSpawnArgs("not-array" as unknown as string[], defaults),
       TypeError,
     );
+  });
+});
+
+describe("runSupabaseBash", () => {
+  test("streams AgentToolResult-shaped updates", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-sandbox-supabase-"));
+    const scriptPath = join(dir, "emit-output.mjs");
+    await writeFile(
+      scriptPath,
+      "process.stdout.write('hello\\n'); process.stdout.write('world\\n');\n",
+      "utf-8",
+    );
+
+    const updates: unknown[] = [];
+    const result = await runSupabaseBash(
+      { args: [], timeout: 5 },
+      { signal: undefined, onUpdate: (update) => updates.push(update) },
+      { ...defaults, supabaseDir: dir, npxBin: process.execPath, supabaseCmd: scriptPath },
+    );
+
+    assert.ok(updates.length > 0, "expected at least one streaming update");
+    for (const update of updates) {
+      assert.equal(typeof update, "object");
+      assert.ok(update !== null);
+      assert.ok(Array.isArray((update as { content?: unknown }).content));
+      assert.equal((update as { content: Array<{ type: string }> }).content[0].type, "text");
+    }
+    assert.deepEqual(result.content, [{ type: "text", text: "helloworld" }]);
+    assert.equal(result.isError, false);
   });
 });
