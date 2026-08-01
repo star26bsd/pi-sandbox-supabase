@@ -9,8 +9,8 @@
  * - `no`:  block destructive commands unconditionally
  *
  * The state file is JSON on disk at the configured path. This allows
- * subagents to read the same gate state as the parent, and lets the
- * parent approve operations that a subagent will then execute.
+ * focused sessions to share gate state while a human approves operations
+ * from another session.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";

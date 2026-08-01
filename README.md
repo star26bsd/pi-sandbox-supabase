@@ -1,6 +1,6 @@
 # pi-sandbox-supabase
 
-Unsandboxed `npx supabase` CLI tool for the [pi coding agent](https://github.com/earendil-works/pi). Gives pi an escape hatch from its sandbox to interact with the Supabase CLI, including Docker-based local database operations.
+A focused Pi session should not need unsandboxed Bash merely to operate Supabase. This extension lets a visible, named Supabase session keep general shell execution disabled or sandboxed while granting host execution only through focused Supabase tools.
 
 > **Related**: [carderne/pi-sandbox](https://github.com/carderne/pi-sandbox) — general-purpose sandbox extension for pi
 
@@ -8,9 +8,8 @@ Unsandboxed `npx supabase` CLI tool for the [pi coding agent](https://github.com
 
 - **`supabase_bash` tool** — spawns `npx supabase` commands outside pi's sandbox, using `child_process.spawn` with `shell: false` for injection-safe argument passing; automatically appends `--agent yes`, and appends `--yes` to destructive commands after project-level gating
 - **`/destructive-db` slash command** — manage destructive-operation modes (`yes`/`no`/`ask`) and approve pending operations; approval queues a follow-up so the active agent can continue without an extra manual “proceed”
-- **File-backed destructive-operations gate** — all destructive commands (`db reset`, `stop`, `declarative sync --apply`) are gated through a state machine persisted to disk, so subagents share the same gate state as the parent session
+- **File-backed destructive-operations gate** — all destructive commands (`db reset`, `stop`, `declarative sync --apply`) are gated through a state machine persisted to disk, so focused sessions share the same gate state
 - **Status bar indicator** — shows current DB mode (e.g. `DB: ask (2 pending)`)
-- **`supabase` subagent config** — optional pi agent definition with read/grep/supabase_bash tools for PG-Delta workflows
 
 ## Installation
 
@@ -36,14 +35,7 @@ cd .pi/extensions/supabase-bash/
 npm install
 ```
 
-3. (Optional) From the project root, copy the subagent config:
-
-```bash
-# From your project root:
-cp .pi/extensions/supabase-bash/agents/supabase.md .pi/agents/
-```
-
-4. Reload pi (`/reload`) or restart. You should see `DB: ask` in the status bar.
+3. Reload pi (`/reload`) or restart. You should see `DB: ask` in the status bar.
 
 ### Option B: Global (available in all projects)
 
@@ -150,16 +142,6 @@ Commands that trigger the gate:
 
 **In `no` mode:** destructive commands are blocked unconditionally.
 
-### Subagent workflow
-
-The included `supabase.md` agent config defines a read-only subagent with `read`, `grep`, and `supabase_bash` tools. It cannot edit files. Use it for:
-
-- Running `npx supabase status`, `db lint`, `db test`, etc.
-- Generating migrations via `npx supabase db schema declarative sync`
-- Inspecting schema files with `read` and `grep`
-
-The subagent handles the destructive-ops protocol: when a command requires approval, it reports the request ID and parent question to you, and waits for you to approve. Approval queues a follow-up so the active agent can retry without an extra manual “proceed”.
-
 ## State file
 
 Runtime state is stored at `.pi/supabase-bash-state.json` relative to the configured `supabaseDir`. The file tracks:
@@ -194,7 +176,7 @@ This file is safe to commit — it stores runtime approval state, not secrets.
 - **Injection-safe**: Uses `child_process.spawn` with `shell: false`. Each argument is a literal value — no shell parsing, no quoting surface, no command injection.
 - **Binary/subcommand are configurable but not derivable from LLM input**: The `npx` and `supabase` prefix is set at extension config time, not from tool arguments.
 - **Destructive-ops gate**: Can be set to `ask` (default) or `no` to prevent unexpected destructive DB operations.
-- **No file I/O from subagent**: The `supabase` subagent has `read` and `grep` but no `write`/`edit` tools.
+- **Session-independent**: The package does not prescribe orchestration or automatically load a role prompt. Users decide which visible, named sessions receive its tools through Pi's tool allowlist.
 
 ## Testing
 

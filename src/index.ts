@@ -12,8 +12,7 @@
  *   - Configurable: supabase directory, state file path, timeout, patterns
  *
  * Installation:
- *   Place this directory in your project's `.pi/extensions/supabase-bash/`
- *   and add the supabase subagent config to `.pi/agents/supabase.md`.
+ *   Place this directory in your project's `.pi/extensions/supabase-bash/`.
  */
 
 import { join } from "node:path";
@@ -242,7 +241,7 @@ export default async function (pi: ExtensionAPI, userOptions?: SupabaseBashOptio
   });
 
   /* ── Session start: initialize state from config ────────────────
-   * Runs once per session start, including subagent forks.
+   * Runs once per session start, including session forks.
    * Only initializes a fresh state file when none exists;
    * on subsequent starts preserves the existing runtime state.
    */
