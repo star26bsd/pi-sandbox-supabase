@@ -16,13 +16,13 @@ The model-facing Supabase tool is named `supabase_cli`. This is a breaking repla
 
 ## Supabase CLI scope
 
-The Supabase CLI tool exposes the complete `npx supabase` command interface. It fixes the executable and command prefix while accepting literal argument arrays, preserving compatibility with existing and future Supabase CLI commands without introducing a second command taxonomy.
+The Supabase CLI tool exposes the complete Supabase CLI command interface. It fixes the user-configured executable and command prefix while accepting literal argument arrays, preserving compatibility with existing and future Supabase CLI commands without introducing a second command taxonomy.
 
 The tool does not classify commands as local or remote. A remote mutation can succeed only when the Supabase session's environment and project configuration provide the required authority. Users are responsible for deciding which credentials and remote configuration are available to their sessions.
 
 Existing destructive-operation gating remains a separate safeguard for recognized destructive commands; it is not a comprehensive Supabase CLI authorization policy.
 
-The package has no built-in obsolete-command policy. Users may configure `blockedCommands` as argument-prefix rules with human-readable reasons. Global and project rules are combined, so project configuration may add restrictions but cannot weaken global restrictions. For example:
+The package has no built-in obsolete-command policy. Users may configure `blockedCommands` as argument-prefix rules with human-readable reasons. A rule matches its contiguous argument sequence even when Supabase global flags precede it. Global and project rules are combined, so project configuration may add restrictions but cannot weaken global restrictions. For example:
 
 ```json
 {
@@ -48,7 +48,7 @@ Configuration is optional and discovered at Pi's standard scopes:
 
 Without either file, defaults are `commands.supabaseCli = ["npx", "supabase"]`, `commands.denoTest = ["deno", "test"]`, `workingDirectory = "supabase"`, and `destructiveDbOps = "ask"`.
 
-Global configuration provides defaults. Project configuration overrides scalar values, command prefixes, and environment keys. Project `PATH` additions are prepended ahead of global additions and the inherited `PATH`.
+Global configuration provides defaults. Project configuration overrides scalar values, command prefixes, and environment keys. Project `PATH` additions are prepended ahead of global additions and the effective child `PATH`.
 
 Child processes inherit Pi's environment by default. An `environment` string sets or overrides a variable; `null` explicitly removes an inherited variable. This allows a Supabase session to withhold remote credentials without constructing an entire environment from scratch.
 

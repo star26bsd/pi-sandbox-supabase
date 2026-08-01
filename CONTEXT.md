@@ -17,7 +17,7 @@ An operation that changes a hosted Supabase project, its data, configuration, se
 _Avoid_: Production operation, deploy command
 
 **Supabase CLI tool**:
-The model-facing module that grants a **Supabase session** host execution through the fixed `npx supabase` interface without granting general shell execution.
+The model-facing module that grants a **Supabase session** host execution through a user-configured Supabase CLI command prefix without granting general shell execution.
 _Avoid_: Supabase Bash, supabase_bash
 
 **Supabase CLI operation**:
@@ -25,7 +25,7 @@ Any invocation provided by the Supabase CLI, passed through the **Supabase CLI t
 _Avoid_: Supabase Bash command, allowed command
 
 **Deno test tool**:
-The model-facing module that grants a **Supabase session** host execution through the fixed `deno test` interface without granting arbitrary Deno or shell execution.
+The model-facing module that grants a **Supabase session** host execution through a user-configured, permission-bounded `deno test` command prefix without granting arbitrary Deno or shell execution.
 _Avoid_: Deno CLI, verification tool
 
 ## Example dialogue
@@ -36,7 +36,7 @@ _Avoid_: Deno CLI, verification tool
 
 **Developer:** Does it reject remote mutations such as function deployment?
 
-**Maintainer:** No. The Supabase CLI interface remains complete. Whether a remote mutation can succeed depends on the credentials and configuration granted to the worker.
+**Maintainer:** No. The Supabase CLI interface remains complete. Whether a remote mutation can succeed depends on the credentials and configuration granted to the Supabase session.
 
 **Developer:** How does the Supabase session run Edge Function tests if the Supabase CLI has no test command for them?
 

@@ -1,0 +1,168 @@
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { after, before, describe, test } from "node:test";
+import {
+  buildChildEnvironment,
+  ConfigurationError,
+  loadConfig,
+  mergeConfig,
+  validateConfig,
+} from "../config.js";
+
+let root: string;
+let home: string;
+let project: string;
+
+before(async () => {
+  root = await mkdtemp(join(tmpdir(), "pi-supabase-tools-config-"));
+  home = join(root, "home");
+  project = join(root, "project");
+  mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+  mkdirSync(join(project, ".pi"), { recursive: true });
+});
+
+after(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+function writeJson(path: string, value: unknown) {
+  writeFileSync(path, JSON.stringify(value), "utf-8");
+}
+
+describe("configuration validation", () => {
+  test("rejects unknown and malformed properties", () => {
+    assert.throws(
+      () => validateConfig({ typo: true }, "config.json"),
+      ConfigurationError,
+    );
+    assert.throws(
+      () => validateConfig({ commands: { supabaseCli: [] } }, "config.json"),
+      /non-empty array/,
+    );
+    assert.throws(
+      () => validateConfig({ environment: { TOKEN: 42 } }, "config.json"),
+      /strings or null/,
+    );
+    assert.throws(
+      () => validateConfig({ blockedCommands: [{ prefix: [], reason: "No" }] }, "config.json"),
+      /non-empty array/,
+    );
+  });
+
+  test("accepts the declarative interface", () => {
+    assert.deepEqual(validateConfig({
+      pathPrepend: ["~/.deno/bin"],
+      environment: { DENO_DIR: "/tmp/cache", TOKEN: null },
+      commands: {
+        supabaseCli: ["/opt/homebrew/bin/supabase"],
+        denoTest: ["deno", "test", "--allow-read=."],
+      },
+      workingDirectory: "supabase",
+      destructiveDbOps: "ask",
+      stateFile: ".pi/supabase-tools-state.json",
+      blockedCommands: [{ prefix: ["db", "diff"], reason: "Use PG-Delta" }],
+    }, "config.json").destructiveDbOps, "ask");
+  });
+});
+
+describe("configuration discovery and merge", () => {
+  test("uses defaults when files are absent", () => {
+    const isolatedHome = join(root, "empty-home");
+    const isolatedProject = join(root, "empty-project");
+    const config = loadConfig({
+      cwd: isolatedProject,
+      projectTrusted: true,
+      homeDirectory: isolatedHome,
+    });
+    assert.deepEqual(config.commands.supabaseCli, ["npx", "supabase"]);
+    assert.deepEqual(config.commands.denoTest, ["deno", "test"]);
+    assert.equal(config.workingDirectory, "supabase");
+    assert.equal(config.destructiveDbOps, "ask");
+  });
+
+  test("project values override global values and additive values preserve order", () => {
+    writeJson(join(home, ".pi", "agent", "supabase-tools.json"), {
+      pathPrepend: ["~/global-bin"],
+      environment: { SHARED: "global", GLOBAL: "yes" },
+      commands: {
+        supabaseCli: ["global-supabase"],
+        denoTest: ["global-deno", "test"],
+      },
+      workingDirectory: "global-supabase",
+      blockedCommands: [{ prefix: ["db", "diff"], reason: "Global policy" }],
+    });
+    writeJson(join(project, ".pi", "supabase-tools.json"), {
+      pathPrepend: ["project-bin"],
+      environment: { SHARED: "project", GLOBAL: null },
+      commands: { supabaseCli: ["project-supabase"] },
+      workingDirectory: "supabase",
+      blockedCommands: [{ prefix: ["stop"], reason: "Project policy" }],
+    });
+
+    const config = loadConfig({
+      cwd: project,
+      projectTrusted: true,
+      homeDirectory: home,
+    });
+    assert.deepEqual(config.pathPrepend, ["project-bin", join(home, "global-bin")]);
+    assert.deepEqual(config.environment, {
+      SHARED: "project",
+      GLOBAL: null,
+    });
+    assert.deepEqual(config.commands.supabaseCli, ["project-supabase"]);
+    assert.deepEqual(config.commands.denoTest, ["global-deno", "test"]);
+    assert.equal(config.workingDirectory, "supabase");
+    assert.deepEqual(config.blockedCommands.map((rule) => rule.prefix), [
+      ["db", "diff"],
+      ["stop"],
+    ]);
+  });
+
+  test("ignores project configuration when the project is untrusted", () => {
+    writeFileSync(join(project, ".pi", "supabase-tools.json"), "{ invalid", "utf-8");
+    const config = loadConfig({
+      cwd: project,
+      projectTrusted: false,
+      homeDirectory: join(root, "empty-untrusted-home"),
+    });
+    assert.deepEqual(config.commands.supabaseCli, ["npx", "supabase"]);
+  });
+
+  test("fails closed for a malformed discovered file", () => {
+    assert.throws(
+      () => loadConfig({
+        cwd: project,
+        projectTrusted: true,
+        homeDirectory: join(root, "empty-malformed-home"),
+      }),
+      /Cannot parse/,
+    );
+  });
+
+  test("expands a configured standalone binary", () => {
+    const config = mergeConfig({
+      commands: { supabaseCli: ["~/bin/supabase"] },
+    }, undefined, "/users/test");
+    assert.deepEqual(config.commands.supabaseCli, ["/users/test/bin/supabase"]);
+  });
+});
+
+describe("child environment", () => {
+  test("inherits, overrides, removes, and prepends PATH", () => {
+    const config = mergeConfig({
+      pathPrepend: ["/custom/bin"],
+      environment: { KEEP: "overridden", REMOVE: null },
+    }, undefined, home);
+    const environment = buildChildEnvironment(config, {
+      PATH: "/inherited/bin",
+      KEEP: "inherited",
+      REMOVE: "secret",
+    });
+    assert.equal(environment.PATH, ["/custom/bin", "/inherited/bin"].join(delimiter));
+    assert.equal(environment.KEEP, "overridden");
+    assert.equal(environment.REMOVE, undefined);
+  });
+});

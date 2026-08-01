@@ -1,131 +1,104 @@
-/**
- * Tests for tool.ts — spawn argument construction and command description.
- */
-
-import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildSpawnArgs, describeCommand, runSupabaseBash } from "../tool.js";
-import type { ResolvedOptions } from "../types.js";
+import { after, before, describe, test } from "node:test";
+import { buildSpawnCommand, describeCommand, runCommand } from "../tool.js";
 
-const defaults: ResolvedOptions = {
-  supabaseDir: "supabase/",
-  stateFile: ".pi/supabase-bash-state.json",
-  defaultTimeout: 120,
-  npxBin: "npx",
-  supabaseCmd: "supabase",
-  customDestructivePatterns: [],
-};
+let directory: string;
 
-describe("buildSpawnArgs", () => {
-  test("returns npx binary with supabase prefix + user args", () => {
-    const [binary, spawnArgs] = buildSpawnArgs(["status"], defaults);
-    assert.equal(binary, "npx");
-    assert.deepEqual(spawnArgs, ["supabase", "status"]);
-  });
-
-  test("passes empty args (shows help)", () => {
-    const [binary, spawnArgs] = buildSpawnArgs([], defaults);
-    assert.equal(binary, "npx");
-    assert.deepEqual(spawnArgs, ["supabase"]);
-  });
-
-  test("preserves spaces as literal argument values", () => {
-    const [, spawnArgs] = buildSpawnArgs(["--name", "my migration"], defaults);
-    assert.ok(
-      spawnArgs.includes("my migration"),
-      "space-containing arg preserved literally",
-    );
-  });
-
-  test("shell metacharacters remain literal values (no shell parsing)", () => {
-    const [, spawnArgs] = buildSpawnArgs(["foo; rm -rf /"], defaults);
-    assert.ok(
-      spawnArgs.includes("foo; rm -rf /"),
-      "metacharacters pass as literal arg, not shell-separated",
-    );
-  });
-
-  test("npx + supabase prefix are hardcoded — input cannot change them", () => {
-    const [binary, spawnArgs] = buildSpawnArgs(["--help"], defaults);
-    assert.equal(binary, "npx");
-    assert.equal(spawnArgs[0], "supabase");
-    assert.ok(!spawnArgs[0].includes("npx"), "prefix is not derived from input");
-  });
-
-  test("uses configured npxBin and supabaseCmd", () => {
-    const custom: ResolvedOptions = {
-      ...defaults,
-      npxBin: "pnpm",
-      supabaseCmd: "supabase-beta",
-    };
-    const [binary, spawnArgs] = buildSpawnArgs(["status"], custom);
-    assert.equal(binary, "pnpm");
-    assert.deepEqual(spawnArgs, ["supabase-beta", "status"]);
-  });
+before(async () => {
+  directory = await mkdtemp(join(tmpdir(), "pi-supabase-tools-runner-"));
 });
 
-describe("describeCommand", () => {
-  test("produces readable command string", () => {
+after(async () => {
+  await rm(directory, { recursive: true, force: true });
+});
+
+describe("command construction", () => {
+  test("appends literal arguments to a fixed prefix", () => {
+    assert.deepEqual(
+      buildSpawnCommand(["npx", "supabase"], ["db", "query", "select 1; rm -rf /"]),
+      ["npx", ["supabase", "db", "query", "select 1; rm -rf /"]],
+    );
+  });
+
+  test("supports a standalone binary prefix", () => {
+    assert.deepEqual(
+      buildSpawnCommand(["/opt/homebrew/bin/supabase"], ["status"]),
+      ["/opt/homebrew/bin/supabase", ["status"]],
+    );
+  });
+
+  test("rejects invalid inputs", () => {
+    assert.throws(() => buildSpawnCommand([], []), /non-empty array/);
+    assert.throws(() => buildSpawnCommand(["deno", "test"], "bad" as never), /args/);
+  });
+
+  test("describes commands without changing execution arguments", () => {
     assert.equal(
-      describeCommand(["db", "reset", "--local"], defaults),
-      "npx supabase db reset --local",
-    );
-  });
-
-  test("empty args produces minimal command", () => {
-    assert.equal(describeCommand([], defaults), "npx supabase ");
-  });
-
-  test("uses configured npxBin and supabaseCmd", () => {
-    const custom: ResolvedOptions = {
-      ...defaults,
-      npxBin: "pnpm",
-      supabaseCmd: "supabase-beta",
-    };
-    assert.equal(
-      describeCommand(["status"], custom),
-      "pnpm supabase-beta status",
+      describeCommand(["deno", "test"], ["--filter", "creates a row"]),
+      "deno test --filter \"creates a row\"",
     );
   });
 });
 
-describe("input validation", () => {
-  test("non-array args throws TypeError", () => {
-    assert.throws(
-      () => buildSpawnArgs("not-array" as unknown as string[], defaults),
-      TypeError,
+describe("direct process execution", () => {
+  test("uses configured prefix, cwd, environment, and streams output", async () => {
+    const script = join(directory, "inspect.mjs");
+    await writeFile(script, [
+      "console.log(process.cwd());",
+      "console.log(process.env.TEST_VALUE);",
+      "console.log(JSON.stringify(process.argv.slice(2)));",
+    ].join("\n"), "utf-8");
+    const updates: string[] = [];
+
+    const result = await runCommand({
+      prefix: [process.execPath, script, "prefix-value"],
+      args: ["literal value", "; rm -rf /"],
+      cwd: directory,
+      environment: { ...process.env, TEST_VALUE: "configured" },
+      timeout: 5,
+    }, {
+      signal: undefined,
+      onUpdate: (update) => updates.push(update.content[0].text),
+    });
+
+    assert.match(result.content[0].text, new RegExp(directory));
+    assert.match(result.content[0].text, /configured/);
+    assert.match(result.content[0].text, /\["prefix-value","literal value","; rm -rf \/"\]/);
+    assert.ok(updates.length > 0);
+    assert.equal(result.details?.exitCode, 0);
+  });
+
+  test("rejects with output when a command exits unsuccessfully", async () => {
+    const script = join(directory, "fail.mjs");
+    await writeFile(script, "console.error('failure detail'); process.exit(7);\n", "utf-8");
+    await assert.rejects(
+      runCommand({
+        prefix: [process.execPath, script],
+        args: [],
+        cwd: directory,
+        environment: process.env,
+        timeout: 5,
+      }, { signal: undefined }),
+      /exit code 7[\s\S]*failure detail/,
     );
   });
-});
 
-describe("runSupabaseBash", () => {
-  test("streams AgentToolResult-shaped updates", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "pi-sandbox-supabase-"));
-    const scriptPath = join(dir, "emit-output.mjs");
-    await writeFile(
-      scriptPath,
-      "process.stdout.write('hello\\n'); process.stdout.write('world\\n');\n",
-      "utf-8",
+  test("terminates commands after the configured timeout", async () => {
+    const script = join(directory, "wait.mjs");
+    await writeFile(script, "setInterval(() => {}, 1000);\n", "utf-8");
+    await assert.rejects(
+      runCommand({
+        prefix: [process.execPath, script],
+        args: [],
+        cwd: directory,
+        environment: process.env,
+        timeout: 0.02,
+      }, { signal: undefined }),
+      /timed out/,
     );
-
-    const updates: unknown[] = [];
-    const result = await runSupabaseBash(
-      { args: [], timeout: 5 },
-      { signal: undefined, onUpdate: (update) => updates.push(update) },
-      { ...defaults, supabaseDir: dir, npxBin: process.execPath, supabaseCmd: scriptPath },
-    );
-
-    assert.ok(updates.length > 0, "expected at least one streaming update");
-    for (const update of updates) {
-      assert.equal(typeof update, "object");
-      assert.ok(update !== null);
-      assert.ok(Array.isArray((update as { content?: unknown }).content));
-      assert.equal((update as { content: Array<{ type: string }> }).content[0].type, "text");
-    }
-    assert.deepEqual(result.content, [{ type: "text", text: "helloworld" }]);
-    assert.equal(result.isError, false);
   });
 });

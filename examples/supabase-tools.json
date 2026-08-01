@@ -1,0 +1,14 @@
+{
+  "pathPrepend": ["~/.deno/bin"],
+  "environment": {
+    "SUPABASE_ACCESS_TOKEN": null
+  },
+  "commands": {
+    "supabaseCli": ["npx", "supabase"],
+    "denoTest": ["deno", "test"]
+  },
+  "workingDirectory": "supabase",
+  "destructiveDbOps": "ask",
+  "stateFile": ".pi/supabase-tools-state.json",
+  "blockedCommands": []
+}

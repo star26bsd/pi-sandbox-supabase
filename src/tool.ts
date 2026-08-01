@@ -1,143 +1,132 @@
 /**
- * supabase_bash tool implementation.
- *
- * Spawns `npx supabase` commands outside the pi sandbox using
- * child_process.spawn with shell: false for injection-safe
- * argument passing.
+ * Direct process execution shared by the focused tools.
  */
 
 import { spawn } from "node:child_process";
-import type { AgentToolResult, ResolvedOptions } from "./types.js";
+import type { AgentToolResult } from "./types.js";
 
-/* ── Output filtering ─────────────────────────────────────────────── */
-
-function filterOutputNag(chunk: string, partialLine: string[]): string {
-  const buffer = [...partialLine];
-  const allText = buffer.length > 0 ? buffer.join("") + chunk : chunk;
-  const lines = allText.split(/\r?\n/);
-  const lastSegment = lines.pop()!;
-  const filtered = lines.filter((line) => {
-    if (/^A new version of Supabase CLI is available:/i.test(line)) return false;
-    if (/^We recommend updating regularly for new features/i.test(line)) return false;
-    return true;
-  });
-  if (lastSegment.length > 0 && !allText.endsWith("\n")) {
-    partialLine.push(lastSegment);
-  }
-  return filtered.join("\n");
-}
-
-/** Optional abort signal and streaming update callback. */
 export interface RunContext {
   signal: AbortSignal | undefined;
-  onUpdate: (partialResult: AgentToolResult) => void;
+  onUpdate?: (partialResult: AgentToolResult) => void;
 }
 
-/**
- * Build the spawn argument list from user-supplied subcommand args.
- * The binary and subcommand prefix are configurable via options.
- *
- * Security: shell: false ensures each argument is a literal value —
- * no shell parsing, no quoting surface, no injection possible.
- */
-export function buildSpawnArgs(
+export interface CommandInvocation {
+  prefix: string[];
+  args: string[];
+  cwd: string;
+  environment: NodeJS.ProcessEnv;
+  timeout: number;
+}
+
+export function buildSpawnCommand(
+  prefix: string[],
   args: string[],
-  options: ResolvedOptions,
 ): [string, string[]] {
+  if (!Array.isArray(prefix) || prefix.length === 0) {
+    throw new TypeError("command prefix must be a non-empty array");
+  }
   if (!Array.isArray(args)) throw new TypeError("args must be an array");
-  return [options.npxBin, [options.supabaseCmd, ...args]];
+  return [prefix[0], [...prefix.slice(1), ...args]];
 }
 
-/**
- * Construct the full command description for tool output.
- */
-export function describeCommand(args: string[], options: ResolvedOptions): string {
-  return `${options.npxBin} ${options.supabaseCmd} ${args.join(" ")}`;
+function quoteForDisplay(arg: string): string {
+  return /^[A-Za-z0-9_./:=@+-]+$/.test(arg) ? arg : JSON.stringify(arg);
 }
 
-/**
- * Spawn `npx supabase` with the given arguments and options.
- * Supports timeout, streaming output, and abort signals.
- */
-export function runSupabaseBash(
-  params: { args: string[]; timeout?: number },
+export function describeCommand(prefix: string[], args: string[]): string {
+  return [...prefix, ...args].map(quoteForDisplay).join(" ");
+}
+
+export function runCommand(
+  invocation: CommandInvocation,
   context: RunContext,
-  options: ResolvedOptions,
 ): Promise<AgentToolResult> {
-  const { args, timeout = options.defaultTimeout } = params;
+  const { prefix, args, cwd, environment, timeout } = invocation;
   const { signal, onUpdate } = context;
-  const [binary, spawnArgs] = buildSpawnArgs(args, options);
+  const [binary, spawnArgs] = buildSpawnCommand(prefix, args);
+  const command = describeCommand(prefix, args);
 
-  const child = spawn(binary, spawnArgs, {
-    shell: false,
-    cwd: options.supabaseDir,
-  });
-
-  const outputChunks: string[] = [];
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-
-  if (timeout > 0) {
-    timeoutHandle = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeout * 1000);
+  if (signal?.aborted) {
+    return Promise.reject(new Error(`Command aborted before execution: ${command}`));
   }
 
-  const stdoutPartial: string[] = [];
-  const stderrPartial: string[] = [];
-
-  child.stdout?.on("data", (chunk) => {
-    const text = chunk.toString();
-    const filtered = filterOutputNag(text, stdoutPartial);
-    outputChunks.push(filtered);
-    onUpdate({ content: [{ type: "text", text: outputChunks.join("") }] });
-  });
-  child.stderr?.on("data", (chunk) => {
-    const text = chunk.toString();
-    const filtered = filterOutputNag(text, stderrPartial);
-    outputChunks.push(filtered);
-    onUpdate({ content: [{ type: "text", text: outputChunks.join("") }] });
-  });
-
-  child.on("error", (err) => {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-    const msg = `Error: ${err.message}\n`;
-    outputChunks.push(msg);
-    onUpdate({ content: [{ type: "text", text: outputChunks.join("") }], isError: true });
-  });
-
-  child.on("close", () => {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-  });
-
   return new Promise((resolve, reject) => {
+    const child = spawn(binary, spawnArgs, {
+      shell: false,
+      cwd,
+      env: environment,
+    });
+
+    const outputChunks: string[] = [];
+    let timedOut = false;
+    let settled = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    const output = () => outputChunks.join("");
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      signal?.removeEventListener("abort", onAbort);
+      reject(error);
+    };
+
     const onAbort = () => {
       child.kill("SIGKILL");
     };
-    signal?.addEventListener("abort", onAbort, { once: true });
 
-    child.on("error", () => {
-      signal?.removeEventListener("abort", onAbort);
+    const appendOutput = (chunk: Buffer | string) => {
+      outputChunks.push(chunk.toString());
+      onUpdate?.({
+        content: [{ type: "text", text: output() }],
+        details: undefined,
+      });
+    };
+
+    child.stdout?.on("data", appendOutput);
+    child.stderr?.on("data", appendOutput);
+
+    child.once("error", (error) => {
+      rejectOnce(new Error(`Unable to start '${command}' in '${cwd}': ${error.message}`));
     });
 
-    child.on("close", (code) => {
+    child.once("close", (code, closeSignal) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       signal?.removeEventListener("abort", onAbort);
 
       if (signal?.aborted) {
-        reject(new Error("aborted"));
+        reject(new Error(`Command aborted: ${command}`));
         return;
       }
       if (timedOut) {
-        reject(new Error(`timeout:${timeout}`));
+        reject(new Error(`Command timed out after ${timeout} seconds: ${command}`));
         return;
       }
-      const isError = (code ?? 1) !== 0;
-      const accumulated = outputChunks.join("");
+      if ((code ?? 1) !== 0) {
+        const suffix = output().length > 0 ? `\n${output()}` : "";
+        reject(
+          new Error(
+            `Command failed with exit code ${code ?? "unknown"}${closeSignal ? ` (${closeSignal})` : ""}: ${command}${suffix}`,
+          ),
+        );
+        return;
+      }
+
       resolve({
-        content: [{ type: "text", text: accumulated }],
-        isError,
+        content: [{ type: "text", text: output() }],
+        details: { command, cwd, exitCode: code ?? 0 },
       });
     });
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    if (timeout > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, timeout * 1000);
+    }
   });
 }

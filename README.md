@@ -1,206 +1,92 @@
 # pi-supabase-tools
 
-A focused Pi session should not need unsandboxed Bash merely to operate Supabase. This extension lets a visible, named Supabase session keep general shell execution disabled or sandboxed while granting host execution only through focused Supabase tools.
+Focused Pi tools for Supabase work without granting general unsandboxed Bash.
 
-> **Related**: [carderne/pi-sandbox](https://github.com/carderne/pi-sandbox) — general-purpose sandbox extension for pi
+- `supabase_cli` runs literal arguments through a configured Supabase CLI prefix.
+- `deno_test` runs Edge Function tests through a permission-bounded `deno test` prefix.
+- `/destructive-db` manages approval for recognized destructive operations.
 
-## What it provides
+Processes are spawned directly with `shell: false`.
 
-- **`supabase_bash` tool** — spawns `npx supabase` commands outside pi's sandbox, using `child_process.spawn` with `shell: false` for injection-safe argument passing; automatically appends `--agent yes`, and appends `--yes` to destructive commands after project-level gating
-- **`/destructive-db` slash command** — manage destructive-operation modes (`yes`/`no`/`ask`) and approve pending operations; approval queues a follow-up so the active agent can continue without an extra manual “proceed”
-- **File-backed destructive-operations gate** — all destructive commands (`db reset`, `stop`, `declarative sync --apply`) are gated through a state machine persisted to disk, so focused sessions share the same gate state
-- **Status bar indicator** — shows current DB mode (e.g. `DB: ask (2 pending)`)
-
-## Installation
-
-### Option A: Project-local (recommended)
-
-1. Copy the extension into your project:
+## Install locally
 
 ```bash
-cp -r pi-supabase-tools/ .pi/extensions/pi-supabase-tools/
-```
-
-Or install via git:
-
-```bash
-cd your-project
-pi install git:github.com/star26bsd/pi-sandbox-supabase
-```
-
-2. Install dependencies:
-
-```bash
-cd .pi/extensions/pi-supabase-tools/
+cd ~/Development/Repos/pi-supabase-tools
 npm install
+pi install ~/Development/Repos/pi-supabase-tools
 ```
 
-3. Reload pi (`/reload`) or restart. You should see `DB: ask` in the status bar.
-
-### Option B: Global (available in all projects)
+For a one-off run:
 
 ```bash
-pi install git:github.com/star26bsd/pi-sandbox-supabase --global
+pi -e ~/Development/Repos/pi-supabase-tools/src/index.ts
 ```
 
-### Option C: No install (one-shot test)
+## Configure
 
-```bash
-pi -e ./pi-supabase-tools/src/index.ts
-```
+Configuration is optional. Copy [`examples/supabase-tools.json`](examples/supabase-tools.json) to either:
 
-## Configuration
+- `~/.pi/agent/supabase-tools.json` — global defaults
+- `<project>/.pi/supabase-tools.json` — trusted-project overrides
 
-### Extension options
-
-Pass configuration when importing the extension. All options are optional with sensible defaults:
-
-```typescript
-// In your wrapper extension or custom setup:
-import supabaseBash from "pi-supabase-tools";
-
-export default function (pi: ExtensionAPI) {
-  supabaseBash(pi, {
-    // Where to execute npx supabase commands (relative to project root)
-    supabaseDir: "supabase/",              // default
-
-    // Path to the destructive-ops state file (relative to supabaseDir)
-    stateFile: ".pi/supabase-bash-state.json", // default
-
-    // Default command timeout in seconds
-    defaultTimeout: 120,                    // default
-
-    // Binary to invoke (default: "npx")
-    npxBin: "npx",
-
-    // Supabase subcommand (default: "supabase")
-    supabaseCmd: "supabase",
-
-    // Custom destructive pattern detectors (built-in patterns: db reset, stop, declarative sync --apply)
-    customDestructivePatterns: [
-      (args) => args.includes("--force"),
-    ],
-  });
-}
-```
-
-### Configuring destructive-ops mode via sandbox.json
-
-Set the initial mode in `.pi/sandbox.json`:
+Without configuration, the package uses:
 
 ```json
 {
+  "commands": {
+    "supabaseCli": ["npx", "supabase"],
+    "denoTest": ["deno", "test"]
+  },
+  "workingDirectory": "supabase",
   "destructiveDbOps": "ask"
 }
 ```
 
-Valid values: `"ask"` (default), `"yes"`, `"no"`.
+Command prefixes also support standalone binaries such as `/opt/homebrew/bin/supabase`. See the [specification](doc/SPEC.md) for the complete JSON interface, merge rules, environment handling, command blocking, and Deno permissions.
 
-## Usage
+## Use
 
-### The `supabase_bash` tool
+```text
+supabase_cli({ args: ["status"] })
+supabase_cli({ args: ["db", "query", "--local", "select current_database();"] })
+supabase_cli({ args: ["db", "reset", "--local"], timeout: 300 })
 
-The agent can call `supabase_bash` with an `args` array and optional `timeout`:
-
-```
-supabase_bash({ args: ["status"] })
-supabase_bash({ args: ["db", "schema", "declarative", "sync", "--help"] })
-supabase_bash({ args: ["db", "reset", "--local"], timeout: 300 })
-```
-
-### The `/destructive-db` command
-
-```
-/destructive-db              # Toggle mode via selector
-/destructive-db yes          # Allow all destructive commands
-/destructive-db no           # Block all destructive commands
-/destructive-db ask          # Require approval (default)
-/destructive-db status       # Show current state
-/destructive-db approve      # Approve oldest pending request and queue agent follow-up
-/destructive-db approve <id> # Approve specific request and queue agent follow-up
-/destructive-db clear        # Clear all pending requests and approvals
+deno_test({ args: ["functions/example/index.test.ts"] })
+deno_test({ args: ["--filter", "creates a row", "functions/example/index.test.ts"] })
 ```
 
-### Destructive operations gate
+Local SQL should use `supabase db query --local`, not `psql` or another direct SQL client.
 
-Commands that trigger the gate:
+Deno permission flags supplied through tool arguments are refused. Grant required permissions only in the trusted `commands.denoTest` prefix.
 
-| Command | Pattern |
-|---------|---------|
-| `npx supabase db reset` | `db reset` (any args) |
-| `npx supabase stop` | `stop` |
-| `npx supabase db schema declarative sync ... --apply` | `declarative sync --apply` |
+Recognized destructive commands use the `ask`, `yes`, or `no` gate. Manage it with:
 
-**In `ask` mode:**
-1. Agent tries to run a destructive command
-2. Tool returns `action: "approval_required"` with a `requestId` and `parentQuestion`
-3. You run `/destructive-db approve <requestId>` (or just `/destructive-db approve`)
-4. The slash command queues a follow-up telling the active agent to rerun the approved command
-5. Agent re-runs the command — it proceeds
-
-**In `yes` mode:** destructive commands run immediately.
-
-**In `no` mode:** destructive commands are blocked unconditionally.
-
-## State file
-
-Runtime state is stored at `.pi/supabase-bash-state.json` relative to the configured `supabaseDir`. The file tracks:
-
-```json
-{
-  "mode": "ask",
-  "pendingRequests": [
-    {
-      "id": "abc123",
-      "command": "db reset",
-      "args": ["db", "reset"],
-      "createdTstamp": "2025-01-01T00:00:00.000Z",
-      "parentQuestion": "I need authorization to run `npx supabase db reset`. ..."
-    }
-  ],
-  "approvals": [
-    {
-      "id": "def456",
-      "command": "stop",
-      "args": ["stop"],
-      "approvedTstamp": "2025-01-01T00:00:00.000Z"
-    }
-  ]
-}
+```text
+/destructive-db [ask|yes|no|status|approve [request-id]|clear]
 ```
 
-This file is safe to commit — it stores runtime approval state, not secrets.
+Gate state defaults to `.pi/supabase-tools-state.json`. Add that file to the consuming project's `.gitignore`.
 
-## Security
+## Security boundary
 
-- **Injection-safe**: Uses `child_process.spawn` with `shell: false`. Each argument is a literal value — no shell parsing, no quoting surface, no command injection.
-- **Binary/subcommand are configurable but not derivable from LLM input**: The `npx` and `supabase` prefix is set at extension config time, not from tool arguments.
-- **Destructive-ops gate**: Can be set to `ask` (default) or `no` to prevent unexpected destructive DB operations.
-- **Session-independent**: The package does not prescribe orchestration or automatically load a role prompt. Users decide which visible, named sessions receive its tools through Pi's tool allowlist.
+This package narrows model choice; it is not an operating-system sandbox around Supabase CLI or Deno. Configured binaries run with the host environment and permissions deliberately granted to the Pi process. Project configuration is loaded only when Pi reports the project as trusted, and invalid discovered configuration fails closed.
 
-## Testing
+## Documentation
+
+- [Specification](doc/SPEC.md)
+- [Domain language](CONTEXT.md)
+- [Deferred work](doc/FUTURE.md)
+- [Optional Supabase session prompt](examples/supabase-session-prompt.md)
+- [Example configuration](examples/supabase-tools.json)
+
+## Development
+
+Requires Node.js 24 or newer.
 
 ```bash
-npm test
-# or directly:
-node --import tsx --test src/test/*.test.ts
+npm run check
 ```
-
-Tests cover:
-- Spawn argument construction and injection safety
-- Destructive pattern detection
-- State file CRUD and validation
-- File-backed mode enforcement (all three modes)
-- Approval lifecycle (create, reuse, consume)
-- Config reading and status formatting
-
-## Requirements
-
-- Node.js >= 24
-- pi coding agent
-- Supabase CLI (available via `npx`)
-- Docker (for local Supabase operations)
 
 ## License
 
-MIT
+[MIT](LICENSE)
