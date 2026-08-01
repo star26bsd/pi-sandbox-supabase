@@ -55,7 +55,7 @@ deno_test({ args: ["functions/example/index.test.ts"] })
 deno_test({ args: ["--filter", "creates a row", "functions/example/index.test.ts"] })
 ```
 
-Local SQL should use `supabase db query --local`, not `psql` or another direct SQL client.
+Local SQL should use `supabase db query --local`, not `psql` or another direct SQL client. See [Local SQL with `db query`](examples/supabase-session-prompt.md#local-sql-with-db-query) for its single-statement and connection-lifetime constraints.
 
 Deno permission flags supplied through tool arguments are refused. Grant required permissions only in the trusted `commands.denoTest` prefix.
 

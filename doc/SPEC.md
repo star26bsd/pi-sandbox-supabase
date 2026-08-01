@@ -102,6 +102,8 @@ The Supabase CLI tool remains the preferred interface wherever the CLI owns the 
 
 The initial scope does not expose `psql`. Supabase sessions execute local SQL through `supabase db query --local`, keeping SQL access behind the Supabase CLI tool. This behavior was verified against Supabase CLI 2.111.0 and a running local Supabase stack.
 
+Each invocation passes SQL as one literal argument and accepts one top-level PostgreSQL prepared statement. Invocations use separate CLI processes and database connections, so transaction state, temporary objects, session settings, and advisory locks do not persist between calls. Multi-operation reversible smoke checks must use one `DO` statement and explicitly clean up.
+
 ## Session steering
 
 The package does not prescribe orchestration or automatically load a role prompt. Users grant `supabase_cli` and `deno_test` to a visible, named Supabase session through Pi's tool allowlist and own any additional steering.
