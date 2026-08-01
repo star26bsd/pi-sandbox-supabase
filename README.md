@@ -1,4 +1,4 @@
-# pi-sandbox-supabase
+# pi-supabase-tools
 
 A focused Pi session should not need unsandboxed Bash merely to operate Supabase. This extension lets a visible, named Supabase session keep general shell execution disabled or sandboxed while granting host execution only through focused Supabase tools.
 
@@ -18,7 +18,7 @@ A focused Pi session should not need unsandboxed Bash merely to operate Supabase
 1. Copy the extension into your project:
 
 ```bash
-cp -r pi-sandbox-supabase/ .pi/extensions/supabase-bash/
+cp -r pi-supabase-tools/ .pi/extensions/pi-supabase-tools/
 ```
 
 Or install via git:
@@ -31,7 +31,7 @@ pi install git:github.com/star26bsd/pi-sandbox-supabase
 2. Install dependencies:
 
 ```bash
-cd .pi/extensions/supabase-bash/
+cd .pi/extensions/pi-supabase-tools/
 npm install
 ```
 
@@ -46,7 +46,7 @@ pi install git:github.com/star26bsd/pi-sandbox-supabase --global
 ### Option C: No install (one-shot test)
 
 ```bash
-pi -e ./pi-sandbox-supabase/src/index.ts
+pi -e ./pi-supabase-tools/src/index.ts
 ```
 
 ## Configuration
@@ -57,7 +57,7 @@ Pass configuration when importing the extension. All options are optional with s
 
 ```typescript
 // In your wrapper extension or custom setup:
-import supabaseBash from "pi-sandbox-supabase";
+import supabaseBash from "pi-supabase-tools";
 
 export default function (pi: ExtensionAPI) {
   supabaseBash(pi, {

@@ -1,5 +1,5 @@
 /**
- * pi-sandbox-supabase — unsandboxed `npx supabase` CLI extension for pi.
+ * pi-supabase-tools — focused Supabase tools for Pi.
  *
  * Registers:
  *   - `supabase_bash` tool: spawns `npx supabase` commands outside the sandbox
@@ -12,7 +12,7 @@
  *   - Configurable: supabase directory, state file path, timeout, patterns
  *
  * Installation:
- *   Place this directory in your project's `.pi/extensions/supabase-bash/`.
+ *   Place this directory in your project's `.pi/extensions/pi-supabase-tools/`.
  */
 
 import { join } from "node:path";

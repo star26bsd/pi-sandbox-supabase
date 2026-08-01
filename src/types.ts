@@ -1,5 +1,5 @@
 /**
- * Type definitions for pi-sandbox-supabase
+ * Type definitions for pi-supabase-tools
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
