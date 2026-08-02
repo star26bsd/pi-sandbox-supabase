@@ -43,6 +43,7 @@ before(async () => {
     commands: {
       supabaseCli: [process.execPath, script, "supabase-prefix"],
       denoTest: [process.execPath, script, "--allow-read=.", "deno-prefix"],
+      denoCache: [process.execPath, script, "cache-prefix"],
     },
     workingDirectory: ".",
     destructiveDbOps: "yes",
@@ -99,7 +100,7 @@ function context() {
 
 describe("registered tools", () => {
   test("registers the clean breaking tool names", () => {
-    assert.deepEqual([...tools.keys()], ["supabase_cli", "deno_test"]);
+    assert.deepEqual([...tools.keys()], ["supabase_cli", "deno_test", "deno_cache"]);
     assert.equal(tools.has("supabase_bash"), false);
   });
 
@@ -152,6 +153,38 @@ describe("registered tools", () => {
       context(),
     );
     assert.equal(refused.details.action, "deno_permission_blocked");
+  });
+
+  test("runs Deno cache arguments after its fixed configured prefix", async () => {
+    const result = await tools.get("deno_cache").execute(
+      "call",
+      { args: ["--reload", "functions/example/index.ts"] },
+      undefined,
+      undefined,
+      context(),
+    );
+    assert.match(result.content[0].text, /cache-prefix/);
+    assert.match(result.content[0].text, /--reload/);
+    assert.match(result.content[0].text, /functions\/example\/index\.ts/);
+  });
+
+  test("blocks Deno cache permission, empty, and excessive-timeout escalation", async () => {
+    for (const args of [["--allow-import=evil.test", "mod.ts"], ["-A", "mod.ts"]]) {
+      const result = await tools.get("deno_cache").execute(
+        "call", { args }, undefined, undefined, context(),
+      );
+      assert.equal(result.details.action, "deno_permission_blocked");
+    }
+    for (const args of [[], ["--"]]) {
+      const result = await tools.get("deno_cache").execute(
+        "call", { args }, undefined, undefined, context(),
+      );
+      assert.equal(result.details.action, "deno_cache_arguments_blocked");
+    }
+    const timeout = await tools.get("deno_cache").execute(
+      "call", { args: ["mod.ts"], timeout: 301 }, undefined, undefined, context(),
+    );
+    assert.equal(timeout.details.action, "deno_cache_timeout_blocked");
   });
 
   test("acquires a configured Deno environment profile and redacts repeated values", async () => {

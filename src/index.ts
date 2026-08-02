@@ -125,6 +125,17 @@ export default async function supabaseTools(pi: ExtensionAPI) {
       description: "Timeout in seconds (default: 120)",
     })),
   });
+  const denoCacheParameters = T.Object({
+    args: T.Array(T.String(), {
+      minItems: 1,
+      description: "One or more literal import/cache arguments appended to the configured Deno cache prefix",
+    }),
+    timeout: T.Optional(T.Integer({
+      minimum: 1,
+      maximum: 300,
+      description: "Timeout in seconds (default: 120; maximum: 300)",
+    })),
+  });
 
   pi.registerTool({
     name: "supabase_cli",
@@ -234,6 +245,70 @@ export default async function supabaseTools(pi: ExtensionAPI) {
         timeout: params.timeout ?? config.defaultTimeout,
         redactValues: acquired?.redactedValues,
         streamOutput: acquired === undefined,
+      }, { signal, onUpdate });
+    },
+  });
+
+  pi.registerTool({
+    name: "deno_cache",
+    label: "Deno Cache",
+    description:
+      "Cache and preflight Deno imports through the user-configured fixed `deno cache` command prefix. " +
+      "Agent arguments cannot increase Deno permissions or select another Deno subcommand.",
+    promptSnippet: "Cache and preflight Supabase Edge Function imports through a bounded deno cache interface",
+    promptGuidelines: [
+      "Use deno_cache for import resolution and cache preflight, not for tests or arbitrary Deno commands.",
+      "Deno permissions are granted only by trusted supabase-tools.json configuration; do not request permission flags in tool arguments.",
+      "Provide at least one import specifier, source file, or cache option; a bare argument separator is refused.",
+    ],
+    parameters: denoCacheParameters,
+    executionMode: "sequential",
+    async execute(
+      _id: string,
+      params: { args: string[]; timeout?: number },
+      signal: AbortSignal | undefined,
+      onUpdate: ((partialResult: AgentToolResult) => void) | undefined,
+      rawContext: unknown,
+    ) {
+      const ctx = rawContext as PiContext;
+      const config = resolveConfig(ctx);
+      if (params.args.length === 0 || (params.args.length === 1 && params.args[0] === "--")) {
+        return {
+          content: [{ type: "text", text: "deno_cache requires a cache target or option; a bare '--' is blocked.\n" }],
+          details: { action: "deno_cache_arguments_blocked" },
+          isError: true,
+        };
+      }
+
+      const permissionArgument = findDenoPermissionArgument(params.args);
+      if (permissionArgument) {
+        return {
+          content: [{
+            type: "text",
+            text:
+              `Deno permission argument '${permissionArgument}' is blocked. ` +
+              "Grant required permissions in commands.denoCache within trusted supabase-tools.json configuration.\n",
+          }],
+          details: { action: "deno_permission_blocked", argument: permissionArgument },
+          isError: true,
+        };
+      }
+
+      const timeout = params.timeout ?? config.defaultTimeout;
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 300) {
+        return {
+          content: [{ type: "text", text: "deno_cache timeout must be an integer from 1 through 300 seconds.\n" }],
+          details: { action: "deno_cache_timeout_blocked" },
+          isError: true,
+        };
+      }
+
+      return runCommand({
+        prefix: config.commands.denoCache,
+        args: params.args,
+        cwd: executionDirectory(ctx, config),
+        environment: buildChildEnvironment(config),
+        timeout,
       }, { signal, onUpdate });
     },
   });

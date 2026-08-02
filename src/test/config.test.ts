@@ -71,6 +71,7 @@ describe("configuration validation", () => {
       commands: {
         supabaseCli: ["/opt/homebrew/bin/supabase"],
         denoTest: ["deno", "test", "--allow-read=."],
+        denoCache: ["deno", "cache", "--allow-import=jsr.io"],
       },
       workingDirectory: "supabase",
       destructiveDbOps: "ask",
@@ -97,6 +98,7 @@ describe("configuration discovery and merge", () => {
     });
     assert.deepEqual(config.commands.supabaseCli, ["npx", "supabase"]);
     assert.deepEqual(config.commands.denoTest, ["deno", "test"]);
+    assert.deepEqual(config.commands.denoCache, ["deno", "cache"]);
     assert.equal(config.workingDirectory, "supabase");
     assert.equal(config.destructiveDbOps, "ask");
   });
@@ -108,6 +110,7 @@ describe("configuration discovery and merge", () => {
       commands: {
         supabaseCli: ["global-supabase"],
         denoTest: ["global-deno", "test"],
+        denoCache: ["global-deno", "cache"],
       },
       workingDirectory: "global-supabase",
       blockedCommands: [{ prefix: ["db", "diff"], reason: "Global policy" }],
@@ -139,6 +142,7 @@ describe("configuration discovery and merge", () => {
     });
     assert.deepEqual(config.commands.supabaseCli, ["project-supabase"]);
     assert.deepEqual(config.commands.denoTest, ["global-deno", "test"]);
+    assert.deepEqual(config.commands.denoCache, ["global-deno", "cache"]);
     assert.equal(config.workingDirectory, "supabase");
     assert.deepEqual(config.blockedCommands.map((rule) => rule.prefix), [
       ["db", "diff"],

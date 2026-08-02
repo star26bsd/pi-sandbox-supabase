@@ -28,6 +28,10 @@ _Avoid_: Supabase Bash command, allowed command
 The model-facing module that grants a **Supabase session** host execution through a user-configured, permission-bounded `deno test` command prefix without granting arbitrary Deno or shell execution. It may select a trusted named environment profile, but never accepts raw environment values.
 _Avoid_: Deno CLI, verification tool
 
+**Deno cache tool**:
+The model-facing module that grants a **Supabase session** focused import and cache preflight through a user-configured, fixed `deno cache` command prefix without granting arbitrary Deno or shell execution.
+_Avoid_: Deno CLI, dependency shell
+
 ## Example dialogue
 
 **Developer:** Can the Supabase session reset the local database?
