@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 import type {
   BlockedCommand,
   ConfigContext,
+  DenoTestEnvironmentProfile,
   ResolvedConfig,
   SupabaseToolsConfig,
 } from "./types.js";
@@ -22,6 +23,7 @@ const DEFAULT_CONFIG: ResolvedConfig = {
   destructiveDbOps: "ask",
   stateFile: ".pi/supabase-tools-state.json",
   blockedCommands: [],
+  denoTestEnvironmentProfiles: {},
   defaultTimeout: 120,
 };
 
@@ -33,6 +35,7 @@ const TOP_LEVEL_KEYS = new Set([
   "destructiveDbOps",
   "stateFile",
   "blockedCommands",
+  "denoTestEnvironmentProfiles",
 ]);
 const COMMAND_KEYS = new Set(["supabaseCli", "denoTest"]);
 
@@ -60,6 +63,58 @@ function validateStringArray(value: unknown, location: string, allowEmpty = true
     throw new ConfigurationError(`${location} must be ${qualifier} of non-empty strings`);
   }
   return value.map((entry, index) => requireNonEmptyString(entry, `${location}[${index}]`));
+}
+
+const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function validateDenoTestEnvironmentProfiles(
+  value: unknown,
+  location: string,
+): Record<string, DenoTestEnvironmentProfile> {
+  if (!isRecord(value)) {
+    throw new ConfigurationError(`${location} must be an object`);
+  }
+
+  const profiles: Record<string, DenoTestEnvironmentProfile> = Object.create(null);
+  for (const [name, entry] of Object.entries(value)) {
+    const profileLocation = `${location}.${name}`;
+    if (!PROFILE_NAME.test(name)) {
+      throw new ConfigurationError(`${location} profile name '${name}' is invalid`);
+    }
+    if (!isRecord(entry)) {
+      throw new ConfigurationError(`${profileLocation} must be an object`);
+    }
+    for (const key of Object.keys(entry)) {
+      if (key !== "source" && key !== "variables") {
+        throw new ConfigurationError(`${profileLocation} has unknown property '${key}'`);
+      }
+    }
+    if (entry.source !== "supabaseStatus") {
+      throw new ConfigurationError(`${profileLocation}.source must be 'supabaseStatus'`);
+    }
+    if (!isRecord(entry.variables) || Object.keys(entry.variables).length === 0) {
+      throw new ConfigurationError(`${profileLocation}.variables must be a non-empty object`);
+    }
+
+    const variables: Record<string, string> = Object.create(null);
+    const targets = new Set<string>();
+    for (const [sourceName, targetValue] of Object.entries(entry.variables)) {
+      if (!ENVIRONMENT_NAME.test(sourceName)) {
+        throw new ConfigurationError(`${profileLocation}.variables source '${sourceName}' is invalid`);
+      }
+      if (typeof targetValue !== "string" || !ENVIRONMENT_NAME.test(targetValue)) {
+        throw new ConfigurationError(`${profileLocation}.variables.${sourceName} must be an environment variable name`);
+      }
+      if (targets.has(targetValue)) {
+        throw new ConfigurationError(`${profileLocation}.variables has duplicate target '${targetValue}'`);
+      }
+      targets.add(targetValue);
+      variables[sourceName] = targetValue;
+    }
+    profiles[name] = { source: "supabaseStatus", variables };
+  }
+  return profiles;
 }
 
 function validateBlockedCommands(value: unknown, location: string): BlockedCommand[] {
@@ -169,6 +224,13 @@ export function validateConfig(value: unknown, source: string): SupabaseToolsCon
     );
   }
 
+  if (value.denoTestEnvironmentProfiles !== undefined) {
+    config.denoTestEnvironmentProfiles = validateDenoTestEnvironmentProfiles(
+      value.denoTestEnvironmentProfiles,
+      `${source}.denoTestEnvironmentProfiles`,
+    );
+  }
+
   return config;
 }
 
@@ -236,6 +298,11 @@ export function mergeConfig(
       ...(globalConfig?.blockedCommands ?? []),
       ...(projectConfig?.blockedCommands ?? []),
     ],
+    denoTestEnvironmentProfiles: Object.assign(
+      Object.create(null) as Record<string, DenoTestEnvironmentProfile>,
+      globalConfig?.denoTestEnvironmentProfiles ?? {},
+      projectConfig?.denoTestEnvironmentProfiles ?? {},
+    ),
     defaultTimeout: DEFAULT_CONFIG.defaultTimeout,
   };
 }

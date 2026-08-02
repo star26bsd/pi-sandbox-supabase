@@ -10,5 +10,14 @@
   "workingDirectory": "supabase",
   "destructiveDbOps": "ask",
   "stateFile": ".pi/supabase-tools-state.json",
-  "blockedCommands": []
+  "blockedCommands": [],
+  "denoTestEnvironmentProfiles": {
+    "local-served": {
+      "source": "supabaseStatus",
+      "variables": {
+        "API_URL": "SUPABASE_URL",
+        "ANON_KEY": "SUPABASE_ANON_KEY"
+      }
+    }
+  }
 }

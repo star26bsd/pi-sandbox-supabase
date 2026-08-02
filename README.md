@@ -6,7 +6,7 @@ Focused Pi tools for Supabase work without granting general unsandboxed Bash.
 - `deno_test` runs Edge Function tests through a permission-bounded `deno test` prefix.
 - `/destructive-db` manages approval for recognized destructive operations.
 
-Processes are spawned directly with `shell: false`.
+Processes are spawned directly with `shell: false`, and timeout or cancellation terminates their process group with a bounded settlement fallback. Retained tool output is limited to the last 50 KiB and 2000 lines.
 
 ## Install locally
 
@@ -38,7 +38,8 @@ Without configuration, the package uses:
     "denoTest": ["deno", "test"]
   },
   "workingDirectory": "supabase",
-  "destructiveDbOps": "ask"
+  "destructiveDbOps": "ask",
+  "denoTestEnvironmentProfiles": {}
 }
 ```
 
@@ -53,11 +54,14 @@ supabase_cli({ args: ["db", "reset", "--local"], timeout: 300 })
 
 deno_test({ args: ["functions/example/index.test.ts"] })
 deno_test({ args: ["--filter", "creates a row", "functions/example/index.test.ts"] })
+deno_test({ args: ["functions/example/index.test.ts"], environmentProfile: "local-served" })
 ```
 
 Local SQL should use `supabase db query --local`, not `psql` or another direct SQL client. See [Local SQL with `db query`](examples/supabase-session-prompt.md#local-sql-with-db-query) for its single-statement and connection-lifetime constraints.
 
 Deno permission flags supplied through tool arguments are refused. Grant required permissions only in the trusted `commands.denoTest` prefix.
+
+Trusted configuration may define named `denoTestEnvironmentProfiles`. A profile runs the fixed internal `supabase status -o env` acquisition and maps configured source names to Deno child variable names; `deno_test` accepts only the profile name, never raw environment data. See the [specification](doc/SPEC.md#deno-test-environment-profiles).
 
 Recognized destructive commands use the `ask`, `yes`, or `no` gate. Manage it with:
 
@@ -70,6 +74,8 @@ Gate state defaults to `.pi/supabase-tools-state.json`. Add that file to the con
 ## Security boundary
 
 This package narrows model choice; it is not an operating-system sandbox around Supabase CLI or Deno. Configured binaries run with the host environment and permissions deliberately granted to the Pi process. Project configuration is loaded only when Pi reports the project as trusted, and invalid discovered configuration fails closed.
+
+Profile-acquired values are replaced with `[REDACTED]` if a test repeats their exact text. This prevents accidental direct disclosure, not deliberate transformation or encoding by code that receives the values.
 
 ## Documentation
 

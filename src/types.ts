@@ -14,6 +14,11 @@ export interface CommandsConfig {
   denoTest?: string[];
 }
 
+export interface DenoTestEnvironmentProfile {
+  source: "supabaseStatus";
+  variables: Record<string, string>;
+}
+
 export interface SupabaseToolsConfig {
   pathPrepend?: string[];
   environment?: Record<string, string | null>;
@@ -22,6 +27,7 @@ export interface SupabaseToolsConfig {
   destructiveDbOps?: DestructiveMode;
   stateFile?: string;
   blockedCommands?: BlockedCommand[];
+  denoTestEnvironmentProfiles?: Record<string, DenoTestEnvironmentProfile>;
 }
 
 export interface ResolvedConfig {
@@ -35,6 +41,7 @@ export interface ResolvedConfig {
   destructiveDbOps: DestructiveMode;
   stateFile: string;
   blockedCommands: BlockedCommand[];
+  denoTestEnvironmentProfiles: Record<string, DenoTestEnvironmentProfile>;
   defaultTimeout: number;
 }
 

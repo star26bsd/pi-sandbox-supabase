@@ -25,7 +25,7 @@ Any invocation provided by the Supabase CLI, passed through the **Supabase CLI t
 _Avoid_: Supabase Bash command, allowed command
 
 **Deno test tool**:
-The model-facing module that grants a **Supabase session** host execution through a user-configured, permission-bounded `deno test` command prefix without granting arbitrary Deno or shell execution.
+The model-facing module that grants a **Supabase session** host execution through a user-configured, permission-bounded `deno test` command prefix without granting arbitrary Deno or shell execution. It may select a trusted named environment profile, but never accepts raw environment values.
 _Avoid_: Deno CLI, verification tool
 
 ## Example dialogue

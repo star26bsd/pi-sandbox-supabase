@@ -50,6 +50,18 @@ describe("configuration validation", () => {
       () => validateConfig({ blockedCommands: [{ prefix: [], reason: "No" }] }, "config.json"),
       /non-empty array/,
     );
+    assert.throws(
+      () => validateConfig({ denoTestEnvironmentProfiles: { "bad name": {} } }, "config.json"),
+      /profile name/,
+    );
+    assert.throws(
+      () => validateConfig({
+        denoTestEnvironmentProfiles: {
+          local: { source: "supabaseStatus", variables: { API_URL: "SAME", ANON_KEY: "SAME" } },
+        },
+      }, "config.json"),
+      /duplicate target/,
+    );
   });
 
   test("accepts the declarative interface", () => {
@@ -64,6 +76,12 @@ describe("configuration validation", () => {
       destructiveDbOps: "ask",
       stateFile: ".pi/supabase-tools-state.json",
       blockedCommands: [{ prefix: ["db", "diff"], reason: "Use PG-Delta" }],
+      denoTestEnvironmentProfiles: {
+        local: {
+          source: "supabaseStatus",
+          variables: { API_URL: "SUPABASE_URL", ANON_KEY: "SUPABASE_ANON_KEY" },
+        },
+      },
     }, "config.json").destructiveDbOps, "ask");
   });
 });
@@ -93,6 +111,10 @@ describe("configuration discovery and merge", () => {
       },
       workingDirectory: "global-supabase",
       blockedCommands: [{ prefix: ["db", "diff"], reason: "Global policy" }],
+      denoTestEnvironmentProfiles: {
+        inherited: { source: "supabaseStatus", variables: { API_URL: "URL" } },
+        replaced: { source: "supabaseStatus", variables: { OLD: "OLD" } },
+      },
     });
     writeJson(join(project, ".pi", "supabase-tools.json"), {
       pathPrepend: ["project-bin"],
@@ -100,6 +122,9 @@ describe("configuration discovery and merge", () => {
       commands: { supabaseCli: ["project-supabase"] },
       workingDirectory: "supabase",
       blockedCommands: [{ prefix: ["stop"], reason: "Project policy" }],
+      denoTestEnvironmentProfiles: {
+        replaced: { source: "supabaseStatus", variables: { NEW: "NEW" } },
+      },
     });
 
     const config = loadConfig({
@@ -119,6 +144,8 @@ describe("configuration discovery and merge", () => {
       ["db", "diff"],
       ["stop"],
     ]);
+    assert.deepEqual(Object.keys(config.denoTestEnvironmentProfiles), ["inherited", "replaced"]);
+    assert.deepEqual({ ...config.denoTestEnvironmentProfiles.replaced.variables }, { NEW: "NEW" });
   });
 
   test("ignores project configuration when the project is untrusted", () => {
