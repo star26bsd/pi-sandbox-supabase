@@ -13,7 +13,6 @@ This file records deferred candidates, not commitments for the first usable `pi-
 
 - Move Pi-provided imports such as `typebox` and `@earendil-works/pi-coding-agent` to `peerDependencies` as required by Pi package guidance.
 - Audit tool errors against Pi's throw-to-signal-error contract.
-- Apply Pi's 50KB/2000-line output truncation contract and preserve full output in temporary files.
 - Audit timeout and cancellation handling for complete process-tree cleanup on every supported platform.
 - Validate interactive, print, JSON, and RPC mode behavior.
 

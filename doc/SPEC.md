@@ -46,7 +46,7 @@ Configuration is optional and discovered at Pi's standard scopes:
 - global: `~/.pi/agent/supabase-tools.json`
 - project: `<cwd>/.pi/supabase-tools.json`
 
-Without either file, defaults are `commands.supabaseCli = ["npx", "supabase"]`, `commands.denoTest = ["deno", "test"]`, `workingDirectory = "supabase"`, and `destructiveDbOps = "ask"`.
+Without either file, defaults are `commands.supabaseCli = ["npx", "supabase"]`, `commands.denoTest = ["deno", "test"]`, `workingDirectory = "supabase"`, `destructiveDbOps = "ask"`, and no Deno test environment profiles.
 
 Global configuration provides defaults. Project configuration overrides scalar values, command prefixes, and environment keys. Project `PATH` additions are prepended ahead of global additions and the effective child `PATH`.
 
@@ -66,7 +66,8 @@ A configuration using the default npm-based Supabase CLI and a Deno binary from 
   },
   "workingDirectory": "supabase",
   "destructiveDbOps": "ask",
-  "stateFile": ".pi/supabase-tools-state.json"
+  "stateFile": ".pi/supabase-tools-state.json",
+  "denoTestEnvironmentProfiles": {}
 }
 ```
 
@@ -98,6 +99,33 @@ Agent-supplied arguments cannot contain Deno permission-increasing flags such as
 
 The Supabase CLI tool remains the preferred interface wherever the CLI owns the operation. `deno_test` exists because Supabase CLI 2.111.0 provides database tests but no Edge Function test command, and current Supabase documentation uses Deno's native test runner.
 
+## Deno test environment profiles
+
+Trusted global or project configuration may define profiles by conservative identifier. Project profiles override global profiles with the same name; otherwise profile maps are combined. Each profile has the fixed `supabaseStatus` source and at least one source-to-target environment variable mapping:
+
+```json
+{
+  "denoTestEnvironmentProfiles": {
+    "local-served": {
+      "source": "supabaseStatus",
+      "variables": {
+        "API_URL": "SUPABASE_URL",
+        "ANON_KEY": "SUPABASE_ANON_KEY",
+        "SERVICE_ROLE_KEY": "SUPABASE_SERVICE_ROLE_KEY"
+      }
+    }
+  }
+}
+```
+
+`deno_test` optionally accepts `environmentProfile: "local-served"`. Omitting it preserves the ordinary configured environment. The tool interface never accepts environment objects or values, and an unknown profile fails before a child process starts.
+
+For a selected profile, the extension privately runs the configured Supabase CLI prefix with only the fixed internal arguments `status -o env`. Effective `blockedCommands` rules apply to this internal operation before execution. It uses the normal resolved working directory and base child environment, a fixed 30-second timeout, and a 64 KiB limit on each output stream. Timeout and cancellation terminate the acquisition process group where the platform supports it and use a bounded settlement fallback rather than waiting indefinitely for inherited stdio. Only strict environment assignments from stdout are decoded as data; no output is evaluated as shell syntax, and values containing NUL are rejected before process launch. The configured source variables are mapped onto the Deno test environment. Unmapped acquired variables are not injected.
+
+Acquisition output is never streamed or included in failures. Errors expose only the acquisition phase, timeout or exit status where applicable, and configured variable names needed to correct missing mappings. Test output for a profile-backed invocation is withheld until completion and every exact repetition of a non-empty injected value is replaced with `[REDACTED]`, including unsuccessful subprocess output. Longer values are replaced first.
+
+This redaction protects against accidental direct repetition. Test code receives the injected values and can deliberately transform, split, hash, or encode them; exact-value redaction is not a sandbox or a defense against intentional exfiltration. Profiles should therefore map only values the selected tests are trusted to receive, and Deno permissions should remain least-privileged.
+
 ## SQL execution
 
 The initial scope does not expose `psql`. Supabase sessions execute local SQL through `supabase db query --local`, keeping SQL access behind the Supabase CLI tool. This behavior was verified against Supabase CLI 2.111.0 and a running local Supabase stack.
@@ -118,4 +146,4 @@ The initial delivery uses platform-neutral direct process spawning and is verifi
 
 The module reduces host execution authority from arbitrary shell commands to Supabase CLI operations. It uses direct process spawning without shell parsing, so arguments remain literal and cannot introduce additional shell commands.
 
-This is a narrower interface than unsandboxed Bash, not an operating-system sandbox around the Supabase CLI process. The CLI and its descendants run with the host permissions and environment explicitly granted to the Pi process.
+This is a narrower interface than unsandboxed Bash, not an operating-system sandbox around the Supabase CLI process. The CLI and its descendants run with the host permissions and environment explicitly granted to the Pi process. On timeout or cancellation, the shared runner terminates the process group where supported and uses a bounded settlement fallback for descendant-held stdio. Combined subprocess output retained by the runner is bounded to its last 50 KiB and 2000 lines; truncation is marked in returned output.

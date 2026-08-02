@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -15,7 +15,30 @@ before(async () => {
   root = await mkdtemp(join(tmpdir(), "pi-supabase-tools-extension-"));
   mkdirSync(join(root, ".pi"), { recursive: true });
   const script = join(root, "print-args.mjs");
-  await writeFile(script, "console.log(JSON.stringify(process.argv.slice(2)));\n", "utf-8");
+  const descendantOutput = join(root, "descendant-secret-output");
+  const descendantReady = join(root, "descendant-test-ready");
+  const descendantCode =
+    `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(descendantOutput)}, process.env.TEST_KEY), 500);`;
+  await writeFile(script, [
+    'import { spawn } from "node:child_process";',
+    'import { existsSync, writeFileSync } from "node:fs";',
+    'const args = process.argv.slice(2);',
+    'if (args[0] === "supabase-prefix" && args[1] === "status" && args[2] === "-o" && args[3] === "env") {',
+    `  if (existsSync(${JSON.stringify(join(root, "nul-status-mode"))})) console.log('API_URL="prefix\\u0000TOPSECRETsuffix"');`,
+    '  else console.log(\'API_URL="http://local.test"\');',
+    '  console.log(\'ANON_KEY="profile-secret-key"\');',
+    '} else {',
+    `  if (existsSync(${JSON.stringify(join(root, "descendant-test-mode"))})) {`,
+    `    spawn(process.execPath, ["-e", ${JSON.stringify(descendantCode)}], { stdio: "inherit", env: process.env });`,
+    `    writeFileSync(${JSON.stringify(descendantReady)}, "ready");`,
+    '    setInterval(() => {}, 1000);',
+    `  } else if (existsSync(${JSON.stringify(join(root, "large-output-mode"))})) process.stdout.write("x".repeat(61 * 1024));`,
+    '  else {',
+    '    console.log(JSON.stringify(args));',
+    '    if (process.env.TEST_URL) console.log(`${process.env.TEST_URL} ${process.env.TEST_KEY}`);',
+    '  }',
+    '}',
+  ].join("\n"), "utf-8");
   await writeFile(join(root, ".pi", "supabase-tools.json"), JSON.stringify({
     commands: {
       supabaseCli: [process.execPath, script, "supabase-prefix"],
@@ -24,6 +47,12 @@ before(async () => {
     workingDirectory: ".",
     destructiveDbOps: "yes",
     blockedCommands: [{ prefix: ["db", "diff"], reason: "Use declarative sync" }],
+    denoTestEnvironmentProfiles: {
+      local: {
+        source: "supabaseStatus",
+        variables: { API_URL: "TEST_URL", ANON_KEY: "TEST_KEY" },
+      },
+    },
   }), "utf-8");
 
   tools = new Map();
@@ -47,6 +76,14 @@ before(async () => {
 after(async () => {
   await rm(root, { recursive: true, force: true });
 });
+
+async function waitForFile(path: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await access(path).then(() => true, () => false)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for fixture file: ${path}`);
+}
 
 function context() {
   return {
@@ -115,6 +152,95 @@ describe("registered tools", () => {
       context(),
     );
     assert.equal(refused.details.action, "deno_permission_blocked");
+  });
+
+  test("acquires a configured Deno environment profile and redacts repeated values", async () => {
+    const updates: string[] = [];
+    const result = await tools.get("deno_test").execute(
+      "call",
+      { args: ["functions/example/index.test.ts"], environmentProfile: "local" },
+      undefined,
+      (update: any) => updates.push(update.content[0].text),
+      context(),
+    );
+    assert.equal(updates.length, 0, "profile-backed tests must not stream output");
+    assert.doesNotMatch(result.content[0].text, /http:\/\/local\.test|profile-secret-key/);
+    assert.match(result.content[0].text, /\[REDACTED\] \[REDACTED\]/);
+
+    await assert.rejects(
+      tools.get("deno_test").execute(
+        "call",
+        { args: ["functions/example/index.test.ts"], environmentProfile: "unknown" },
+        undefined,
+        undefined,
+        context(),
+      ),
+      /Unknown Deno test environment profile 'unknown'/,
+    );
+  });
+
+  test("rejects acquired NUL values without exposing them through process launch", async () => {
+    const marker = join(root, "nul-status-mode");
+    await writeFile(marker, "enabled");
+    try {
+      await assert.rejects(
+        tools.get("deno_test").execute(
+          "call",
+          { args: ["functions/example/index.test.ts"], environmentProfile: "local" },
+          undefined,
+          undefined,
+          context(),
+        ),
+        (error: Error) => !error.message.includes("TOPSECRET") && /malformed data/.test(error.message),
+      );
+    } finally {
+      await rm(marker, { force: true });
+    }
+  });
+
+  test("bounds retained output for profile-backed tests", async () => {
+    const marker = join(root, "large-output-mode");
+    await writeFile(marker, "enabled");
+    try {
+      const result = await tools.get("deno_test").execute(
+        "call",
+        { args: ["functions/example/index.test.ts"], environmentProfile: "local" },
+        undefined,
+        undefined,
+        context(),
+      );
+      assert.ok(Buffer.byteLength(result.content[0].text) <= 50 * 1024);
+      assert.match(result.content[0].text, /^\[output truncated/);
+      assert.equal(result.details.outputTruncated, true);
+    } finally {
+      await rm(marker, { force: true });
+    }
+  });
+
+  test("aborting a profile-backed test terminates descendants with inherited values", async () => {
+    const mode = join(root, "descendant-test-mode");
+    const ready = join(root, "descendant-test-ready");
+    const output = join(root, "descendant-secret-output");
+    await writeFile(mode, "enabled");
+    const controller = new AbortController();
+    try {
+      const execution = tools.get("deno_test").execute(
+        "call",
+        { args: ["functions/example/index.test.ts"], environmentProfile: "local" },
+        controller.signal,
+        undefined,
+        context(),
+      );
+      await waitForFile(ready);
+      const started = Date.now();
+      controller.abort();
+      await assert.rejects(execution, /Command aborted/);
+      assert.ok(Date.now() - started < 700, "abort must settle after terminating the process tree");
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      assert.equal(existsSync(output), false, "descendant must not retain and write the injected value");
+    } finally {
+      await Promise.all([mode, ready, output].map((path) => rm(path, { force: true })));
+    }
   });
 
   test("completes the destructive approval workflow", async () => {

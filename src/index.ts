@@ -7,6 +7,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { findBlockedCommand, findDenoPermissionArgument } from "./command-policy.js";
 import { buildChildEnvironment, loadConfig } from "./config.js";
+import { acquireDenoTestEnvironment } from "./environment-profile.js";
 import {
   checkDestructive,
   defaultState,
@@ -112,6 +113,18 @@ export default async function supabaseTools(pi: ExtensionAPI) {
       description: "Timeout in seconds (default: 120)",
     })),
   });
+  const denoTestParameters = T.Object({
+    args: T.Array(T.String(), {
+      description: "Literal arguments appended to the configured Deno test prefix",
+    }),
+    environmentProfile: T.Optional(T.String({
+      description: "Exact name of a configured Deno test environment profile",
+    })),
+    timeout: T.Optional(T.Integer({
+      minimum: 1,
+      description: "Timeout in seconds (default: 120)",
+    })),
+  });
 
   pi.registerTool({
     name: "supabase_cli",
@@ -171,12 +184,13 @@ export default async function supabaseTools(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use deno_test only for Edge Function tests that the Supabase CLI cannot run.",
       "Deno permissions are granted only by trusted supabase-tools.json configuration; do not request permission flags in tool arguments.",
+      "Select only a configured environment profile name; never pass raw environment values.",
     ],
-    parameters,
+    parameters: denoTestParameters,
     executionMode: "sequential",
     async execute(
       _id: string,
-      params: { args: string[]; timeout?: number },
+      params: { args: string[]; environmentProfile?: string; timeout?: number },
       signal: AbortSignal | undefined,
       onUpdate: ((partialResult: AgentToolResult) => void) | undefined,
       rawContext: unknown,
@@ -200,12 +214,26 @@ export default async function supabaseTools(pi: ExtensionAPI) {
         };
       }
 
+      const cwd = executionDirectory(ctx, config);
+      const baseEnvironment = buildChildEnvironment(config);
+      const acquired = params.environmentProfile === undefined
+        ? undefined
+        : await acquireDenoTestEnvironment(
+          params.environmentProfile,
+          config,
+          cwd,
+          baseEnvironment,
+          signal,
+        );
+
       return runCommand({
         prefix: config.commands.denoTest,
         args: params.args,
-        cwd: executionDirectory(ctx, config),
-        environment: buildChildEnvironment(config),
+        cwd,
+        environment: acquired?.environment ?? baseEnvironment,
         timeout: params.timeout ?? config.defaultTimeout,
+        redactValues: acquired?.redactedValues,
+        streamOutput: acquired === undefined,
       }, { signal, onUpdate });
     },
   });
