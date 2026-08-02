@@ -4,6 +4,7 @@ Focused Pi tools for Supabase work without granting general unsandboxed Bash.
 
 - `supabase_cli` runs literal arguments through a configured Supabase CLI prefix.
 - `deno_test` runs Edge Function tests through a permission-bounded `deno test` prefix.
+- `deno_cache` performs focused import/cache preflight through a fixed `deno cache` prefix.
 - `/destructive-db` manages approval for recognized destructive operations.
 
 Processes are spawned directly with `shell: false`, and timeout or cancellation terminates their process group with a bounded settlement fallback. Retained tool output is limited to the last 50 KiB and 2000 lines.
@@ -35,7 +36,8 @@ Without configuration, the package uses:
 {
   "commands": {
     "supabaseCli": ["npx", "supabase"],
-    "denoTest": ["deno", "test"]
+    "denoTest": ["deno", "test"],
+    "denoCache": ["deno", "cache"]
   },
   "workingDirectory": "supabase",
   "destructiveDbOps": "ask",
@@ -55,11 +57,14 @@ supabase_cli({ args: ["db", "reset", "--local"], timeout: 300 })
 deno_test({ args: ["functions/example/index.test.ts"] })
 deno_test({ args: ["--filter", "creates a row", "functions/example/index.test.ts"] })
 deno_test({ args: ["functions/example/index.test.ts"], environmentProfile: "local-served" })
+
+deno_cache({ args: ["functions/example/index.ts"] })
+deno_cache({ args: ["--reload", "functions/example/index.ts"] })
 ```
 
 Local SQL should use `supabase db query --local`, not `psql` or another direct SQL client. See [Local SQL with `db query`](examples/supabase-session-prompt.md#local-sql-with-db-query) for its single-statement and connection-lifetime constraints.
 
-Deno permission flags supplied through tool arguments are refused. Grant required permissions only in the trusted `commands.denoTest` prefix.
+Deno permission flags supplied through either Deno tool's arguments are refused. Grant required permissions only in the corresponding trusted command prefix. `deno_cache` requires at least one argument, rejects a bare `--`, and caps model-selected timeouts at 300 seconds.
 
 Trusted configuration may define named `denoTestEnvironmentProfiles`. A profile runs the fixed internal `supabase status -o env` acquisition and maps configured source names to Deno child variable names; `deno_test` accepts only the profile name, never raw environment data. See the [specification](doc/SPEC.md#deno-test-environment-profiles).
 

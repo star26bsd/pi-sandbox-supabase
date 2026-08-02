@@ -5,7 +5,8 @@
   },
   "commands": {
     "supabaseCli": ["npx", "supabase"],
-    "denoTest": ["deno", "test"]
+    "denoTest": ["deno", "test"],
+    "denoCache": ["deno", "cache"]
   },
   "workingDirectory": "supabase",
   "destructiveDbOps": "ask",

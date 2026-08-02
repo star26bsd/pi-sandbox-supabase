@@ -12,6 +12,7 @@ export interface BlockedCommand {
 export interface CommandsConfig {
   supabaseCli?: string[];
   denoTest?: string[];
+  denoCache?: string[];
 }
 
 export interface DenoTestEnvironmentProfile {
@@ -36,6 +37,7 @@ export interface ResolvedConfig {
   commands: {
     supabaseCli: string[];
     denoTest: string[];
+    denoCache: string[];
   };
   workingDirectory: string;
   destructiveDbOps: DestructiveMode;

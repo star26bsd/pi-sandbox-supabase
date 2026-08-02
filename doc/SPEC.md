@@ -46,7 +46,7 @@ Configuration is optional and discovered at Pi's standard scopes:
 - global: `~/.pi/agent/supabase-tools.json`
 - project: `<cwd>/.pi/supabase-tools.json`
 
-Without either file, defaults are `commands.supabaseCli = ["npx", "supabase"]`, `commands.denoTest = ["deno", "test"]`, `workingDirectory = "supabase"`, `destructiveDbOps = "ask"`, and no Deno test environment profiles.
+Without either file, defaults are `commands.supabaseCli = ["npx", "supabase"]`, `commands.denoTest = ["deno", "test"]`, `commands.denoCache = ["deno", "cache"]`, `workingDirectory = "supabase"`, `destructiveDbOps = "ask"`, and no Deno test environment profiles.
 
 Global configuration provides defaults. Project configuration overrides scalar values, command prefixes, and environment keys. Project `PATH` additions are prepended ahead of global additions and the effective child `PATH`.
 
@@ -62,7 +62,8 @@ A configuration using the default npm-based Supabase CLI and a Deno binary from 
   },
   "commands": {
     "supabaseCli": ["npx", "supabase"],
-    "denoTest": ["deno", "test"]
+    "denoTest": ["deno", "test"],
+    "denoCache": ["deno", "cache"]
   },
   "workingDirectory": "supabase",
   "destructiveDbOps": "ask",
@@ -98,6 +99,14 @@ The extension exposes a separate `deno_test` tool with the fixed `deno test` exe
 Agent-supplied arguments cannot contain Deno permission-increasing flags such as `--allow-*`, `--allow-all`, `--allow-run`, `--allow-scripts`, `-A`, or equivalent short forms. Trusted global or project configuration grants required permissions by including them in the fixed `commands.denoTest` prefix. The default prefix grants no Deno permissions, so a session may select tests and filters but cannot increase its configured authority.
 
 The Supabase CLI tool remains the preferred interface wherever the CLI owns the operation. `deno_test` exists because Supabase CLI 2.111.0 provides database tests but no Edge Function test command, and current Supabase documentation uses Deno's native test runner.
+
+## Deno import/cache preflight
+
+The separate `deno_cache` tool exposes only a user-configured fixed command prefix, defaulting to `deno cache`, with literal model-supplied arguments. Pinning the executable and `cache` subcommand prevents selection of arbitrary Deno subcommands or shell commands while retaining Deno's import specifiers and cache options.
+
+`deno_cache` requires at least one argument and refuses a bare `--`. Agent-supplied Deno permission flags are blocked using the same policy as `deno_test`, including `--allow-import`, `--allow-scripts`, `--allow-run`, `--allow-all`, `-A`, and combined permission short forms. Required permissions may only be placed in the trusted `commands.denoCache` prefix. This is deliberately not a brittle general Deno-option allowlist: options and import targets remain literal arguments to the already-fixed cache subcommand.
+
+The tool uses the shared resolved working directory and declarative child environment. It accepts model-selected integer timeouts from 1 through 300 seconds, defaulting to 120, propagates cancellation, spawns directly with `shell: false`, and retains only the last 50 KiB and 2000 lines of combined output. It does not accept an environment profile.
 
 ## Deno test environment profiles
 
@@ -146,4 +155,4 @@ The initial delivery uses platform-neutral direct process spawning and is verifi
 
 The module reduces host execution authority from arbitrary shell commands to Supabase CLI operations. It uses direct process spawning without shell parsing, so arguments remain literal and cannot introduce additional shell commands.
 
-This is a narrower interface than unsandboxed Bash, not an operating-system sandbox around the Supabase CLI process. The CLI and its descendants run with the host permissions and environment explicitly granted to the Pi process. On timeout or cancellation, the shared runner terminates the process group where supported and uses a bounded settlement fallback for descendant-held stdio. Combined subprocess output retained by the runner is bounded to its last 50 KiB and 2000 lines; truncation is marked in returned output.
+This is a narrower interface than unsandboxed Bash, not an operating-system sandbox around the Supabase CLI or Deno processes. The tools and their descendants run with the host permissions and environment explicitly granted to the Pi process. On timeout or cancellation, the shared runner terminates the process group where supported and uses a bounded settlement fallback for descendant-held stdio. Combined subprocess output retained by the runner is bounded to its last 50 KiB and 2000 lines; truncation is marked in returned output.

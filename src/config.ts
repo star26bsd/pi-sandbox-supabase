@@ -18,6 +18,7 @@ const DEFAULT_CONFIG: ResolvedConfig = {
   commands: {
     supabaseCli: ["npx", "supabase"],
     denoTest: ["deno", "test"],
+    denoCache: ["deno", "cache"],
   },
   workingDirectory: "supabase",
   destructiveDbOps: "ask",
@@ -37,7 +38,7 @@ const TOP_LEVEL_KEYS = new Set([
   "blockedCommands",
   "denoTestEnvironmentProfiles",
 ]);
-const COMMAND_KEYS = new Set(["supabaseCli", "denoTest"]);
+const COMMAND_KEYS = new Set(["supabaseCli", "denoTest", "denoCache"]);
 
 export class ConfigurationError extends Error {
   constructor(message: string) {
@@ -195,6 +196,13 @@ export function validateConfig(value: unknown, source: string): SupabaseToolsCon
         false,
       );
     }
+    if (value.commands.denoCache !== undefined) {
+      config.commands.denoCache = validateStringArray(
+        value.commands.denoCache,
+        `${source}.commands.denoCache`,
+        false,
+      );
+    }
   }
 
   if (value.workingDirectory !== undefined) {
@@ -281,6 +289,10 @@ export function mergeConfig(
       ),
       denoTest: expandCommand(
         projectCommands.denoTest ?? globalCommands.denoTest ?? DEFAULT_CONFIG.commands.denoTest,
+        homeDirectory,
+      ),
+      denoCache: expandCommand(
+        projectCommands.denoCache ?? globalCommands.denoCache ?? DEFAULT_CONFIG.commands.denoCache,
         homeDirectory,
       ),
     },
