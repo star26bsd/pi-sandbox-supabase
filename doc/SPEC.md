@@ -141,6 +141,20 @@ The initial scope does not expose `psql`. Supabase sessions execute local SQL th
 
 Each invocation passes SQL as one literal argument and accepts one top-level PostgreSQL prepared statement. Invocations use separate CLI processes and database connections, so transaction state, temporary objects, session settings, and advisory locks do not persist between calls. Multi-operation reversible smoke checks must use one `DO` statement and explicitly clean up.
 
+## Edge Functions service lifecycle
+
+The extension registers `supabase_functions_serve({ action: "start" | "status" | "stop" })`. It accepts no model-provided process, command, environment, path, timeout, PID, signal, port, probe, or log controls.
+
+Start is disabled unless effective trusted configuration contains `functionsServe: { args: string[] }`; an empty array is valid. The project object replaces the global object as a whole. Start requires `ctx.isProjectTrusted()`. It directly spawns the configured `commands.supabaseCli` prefix followed by `functions`, `serve`, and the trusted arguments, with `shell: false`, the shared resolved working directory, and shared child environment. Effective `blockedCommands` rules apply to that logical argument list. The extension never creates, reads, changes, or removes environment files.
+
+One in-memory manager owns one controller per project for the current Pi session. A controller is exclusive for its project: this package does not support multiple concurrently managed `functions serve` instances for the same project. It performs no external adoption, process or port discovery, PID file, lock, lease, daemon, or cross-session coordination. State is serialized through `stopped`, `starting`, `running`, and `stopping`. Repeated start while running and stop while stopped are idempotent. Unexpected exit returns the controller to stopped and records only timestamp, exit code, and signal. Stop and status use captured live state even if configuration later changes or becomes malformed.
+
+Startup uses a supervised long-lived process and the fixed 120-second timeout. Both output streams are drained before readiness waiting. Readiness requires Supabase's `Serving functions on ...` marker, tolerating ANSI, timestamps, UTF-8, and chunk boundaries. The marker is emitted by the embedded `Deno.serve` listener in Supabase CLI 2.111.0; it establishes listener startup, not the health of any function. There is no HTTP probe. Marker changes cause timeout and fail closed. Early exit, spawn error, abort, shutdown during start, or timeout terminates the owned process group and settles boundedly.
+
+Stop sends SIGTERM to the owned process group and allows a bounded 10-second grace for Supabase CLI 2.111.0's Bun/TypeScript path to remove the Edge Runtime container and staged secret artifacts. It uses SIGKILL only if the grace expires, then bounds stdio settlement. A forced stop records `cleanup_unconfirmed`; it never claims confirmed cleanup. Existing one-shot timeout and abort behavior remains immediate hard process-tree termination. Normal quit, reload, new, resume, and fork invokes idempotent cleanup. Recovery from SIGKILL, host failure, or power loss is out of scope.
+
+Service output remains private and is never sent through tool updates, results, errors, details, session lifecycle state, or persisted entries. Results contain only canned phase text plus structured phase, timestamps, exit code/signal, and cleanup confirmation. The tool narrows model choice but is not an operating-system sandbox.
+
 ## Session steering
 
 The package does not prescribe orchestration or automatically load a role prompt. Users grant `supabase_cli` and `deno_test` to a visible, named Supabase session through Pi's tool allowlist and own any additional steering.

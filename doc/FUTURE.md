@@ -16,6 +16,11 @@ This file records deferred candidates, not commitments for the first usable `pi-
 - Audit timeout and cancellation handling for complete process-tree cleanup on every supported platform.
 - Validate interactive, print, JSON, and RPC mode behavior.
 
+## Functions service recovery
+
+- Recovery after SIGKILL, host failure, or power loss is deliberately deferred; do not add PID files, process discovery, external adoption, locks, leases, or cross-session coordination without a separately designed ownership model.
+- Reverify the private listener-readiness marker and graceful cleanup behavior when upgrading beyond Supabase CLI 2.111.0.
+
 ## Distribution verification
 
 - Add clean-install smoke tests for npm and git package sources.

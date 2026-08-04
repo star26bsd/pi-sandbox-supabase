@@ -5,6 +5,7 @@ Focused Pi tools for Supabase work without granting general unsandboxed Bash.
 - `supabase_cli` runs literal arguments through a configured Supabase CLI prefix.
 - `deno_test` runs Edge Function tests through a permission-bounded `deno test` prefix.
 - `deno_cache` performs focused import/cache preflight through a fixed `deno cache` prefix.
+- `supabase_functions_serve` manages one trusted-configured, session-owned Edge Functions service.
 - `/destructive-db` manages approval for recognized destructive operations.
 
 Processes are spawned directly with `shell: false`, and timeout or cancellation terminates their process group with a bounded settlement fallback. Retained tool output is limited to the last 50 KiB and 2000 lines.
@@ -45,7 +46,17 @@ Without configuration, the package uses:
 }
 ```
 
-Command prefixes also support standalone binaries such as `/opt/homebrew/bin/supabase`. See the [specification](doc/SPEC.md) for the complete JSON interface, merge rules, environment handling, command blocking, and Deno permissions.
+Command prefixes also support standalone binaries such as `/opt/homebrew/bin/supabase`. To explicitly enable the functions service lifecycle, add trusted configuration such as:
+
+```json
+{
+  "functionsServe": {
+    "args": ["--env-file", ".env.local"]
+  }
+}
+```
+
+See the [specification](doc/SPEC.md) for the complete JSON interface, merge rules, environment handling, command blocking, and Deno permissions.
 
 ## Use
 
@@ -60,6 +71,10 @@ deno_test({ args: ["functions/example/index.test.ts"], environmentProfile: "loca
 
 deno_cache({ args: ["functions/example/index.ts"] })
 deno_cache({ args: ["--reload", "functions/example/index.ts"] })
+
+supabase_functions_serve({ action: "start" })
+supabase_functions_serve({ action: "status" })
+supabase_functions_serve({ action: "stop" })
 ```
 
 Local SQL should use `supabase db query --local`, not `psql` or another direct SQL client. See [Local SQL with `db query`](examples/supabase-session-prompt.md#local-sql-with-db-query) for its single-statement and connection-lifetime constraints.
@@ -67,6 +82,8 @@ Local SQL should use `supabase db query --local`, not `psql` or another direct S
 Deno permission flags supplied through either Deno tool's arguments are refused. Grant required permissions only in the corresponding trusted command prefix. `deno_cache` requires at least one argument, rejects a bare `--`, and caps model-selected timeouts at 300 seconds.
 
 Trusted configuration may define named `denoTestEnvironmentProfiles`. A profile runs the fixed internal `supabase status -o env` acquisition and maps configured source names to Deno child variable names; `deno_test` accepts only the profile name, never raw environment data. See the [specification](doc/SPEC.md#deno-test-environment-profiles).
+
+`functionsServe` is optional and its presence explicitly enables start. Its trusted literal `args` are appended to the configured Supabase CLI prefix plus `functions serve`; the model cannot supply arguments, paths, environment, ports, signals, timeouts, PIDs, probes, or logs. Start requires a trusted project. Service output is drained privately and never returned or streamed. A running result means the Supabase listener marker was observed, not that a particular function is healthy. The lifecycle is in-memory and exclusive to one controller per project in the current Pi session; quit, reload, new, resume, and fork clean it up. SIGKILL and power-loss recovery are out of scope. Listener readiness is verified against Supabase CLI 2.111.0 and fails closed on marker changes.
 
 Recognized destructive commands use the `ask`, `yes`, or `no` gate. Manage it with:
 

@@ -9,6 +9,9 @@
     "denoCache": ["deno", "cache"]
   },
   "workingDirectory": "supabase",
+  "functionsServe": {
+    "args": ["--env-file", ".env.local"]
+  },
   "destructiveDbOps": "ask",
   "stateFile": ".pi/supabase-tools-state.json",
   "blockedCommands": [],

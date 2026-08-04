@@ -13,6 +13,23 @@ export function spawnInProcessGroup(
   });
 }
 
+export function signalProcessTree(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals,
+): boolean {
+  if (process.platform === "win32") return child.kill(signal);
+
+  if (child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch {
+      // Fall back when process-group signalling is unavailable or the child already exited.
+    }
+  }
+  return child.kill(signal);
+}
+
 export function terminateProcessTree(child: ReturnType<typeof spawn>) {
   if (process.platform === "win32") {
     if (child.pid !== undefined) {

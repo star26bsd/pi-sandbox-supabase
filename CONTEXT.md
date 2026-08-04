@@ -32,6 +32,10 @@ _Avoid_: Deno CLI, verification tool
 The model-facing module that grants a **Supabase session** focused import and cache preflight through a user-configured, fixed `deno cache` command prefix without granting arbitrary Deno or shell execution.
 _Avoid_: Deno CLI, dependency shell
 
+**Functions serve tool**:
+The model-facing module that starts, inspects, and stops one trusted-configured, Pi-session-owned `supabase functions serve` process for a project. It reports lifecycle metadata, never service output or function health.
+_Avoid_: Functions daemon, service broker, log viewer
+
 ## Example dialogue
 
 **Developer:** Can the Supabase session reset the local database?

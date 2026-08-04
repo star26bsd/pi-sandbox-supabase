@@ -8,6 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { findBlockedCommand, findDenoPermissionArgument } from "./command-policy.js";
 import { buildChildEnvironment, loadConfig } from "./config.js";
 import { acquireDenoTestEnvironment } from "./environment-profile.js";
+import { FunctionsServeManager } from "./functions-serve.js";
 import {
   checkDestructive,
   defaultState,
@@ -104,6 +105,7 @@ function approveRequest(
 
 export default async function supabaseTools(pi: ExtensionAPI) {
   const T = await getType();
+  const functionsServeManager = new FunctionsServeManager();
   const parameters = T.Object({
     args: T.Array(T.String(), {
       description: "Literal arguments appended to the configured command prefix",
@@ -135,6 +137,52 @@ export default async function supabaseTools(pi: ExtensionAPI) {
       maximum: 300,
       description: "Timeout in seconds (default: 120; maximum: 300)",
     })),
+  });
+
+  pi.registerTool({
+    name: "supabase_functions_serve",
+    label: "Supabase Functions Serve",
+    description:
+      "Start, inspect, or stop the session-owned Supabase Edge Functions service using trusted configuration.",
+    promptSnippet: "Manage the trusted session-owned Supabase Edge Functions service",
+    promptGuidelines: [
+      "Use supabase_functions_serve to manage the configured long-lived Edge Functions service; do not use supabase_cli for that lifecycle.",
+      "Treat a running result as listener readiness, not proof that any particular function is healthy.",
+    ],
+    parameters: T.Object({
+      action: T.String({
+        enum: ["start", "status", "stop"],
+        description: "Lifecycle action for the session-owned functions service",
+      }),
+    }),
+    executionMode: "sequential",
+    async execute(
+      _id: string,
+      params: { action: "start" | "status" | "stop" },
+      signal: AbortSignal | undefined,
+      _onUpdate: ((partialResult: AgentToolResult) => void) | undefined,
+      rawContext: unknown,
+    ) {
+      const ctx = rawContext as PiContext;
+      const controller = functionsServeManager.controller(ctx.cwd);
+      if (params.action === "status") return controller.status();
+      if (params.action === "stop") return controller.stop();
+      if (!ctx.isProjectTrusted()) {
+        throw new Error("Supabase functions serve startup failed: project_untrusted");
+      }
+      const config = resolveConfig(ctx);
+      if (!config.functionsServe) {
+        throw new Error("Supabase functions serve startup failed: not_enabled_by_configuration");
+      }
+      return controller.start({
+        prefix: config.commands.supabaseCli,
+        args: config.functionsServe.args,
+        cwd: executionDirectory(ctx, config),
+        environment: buildChildEnvironment(config),
+        timeoutSeconds: config.defaultTimeout,
+        blockedCommands: config.blockedCommands,
+      }, signal);
+    },
   });
 
   pi.registerTool({
@@ -397,6 +445,10 @@ export default async function supabaseTools(pi: ExtensionAPI) {
 
       ctx.ui.notify("Usage: /destructive-db [mode|status|approve [id]|clear]");
     },
+  });
+
+  pi.on("session_shutdown", async () => {
+    await functionsServeManager.shutdown();
   });
 
   pi.on("session_start", async (_event: unknown, rawContext: unknown) => {

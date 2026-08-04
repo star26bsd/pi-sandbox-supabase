@@ -10,6 +10,7 @@ let root: string;
 let tools: Map<string, any>;
 let commands: Map<string, any>;
 let sentMessages: string[];
+let eventHandlers: Map<string, (...args: any[]) => Promise<void>>;
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), "pi-supabase-tools-extension-"));
@@ -23,7 +24,11 @@ before(async () => {
     'import { spawn } from "node:child_process";',
     'import { existsSync, writeFileSync } from "node:fs";',
     'const args = process.argv.slice(2);',
-    'if (args[0] === "supabase-prefix" && args[1] === "status" && args[2] === "-o" && args[3] === "env") {',
+    'if (args[0] === "supabase-prefix" && args[1] === "functions" && args[2] === "serve") {',
+    '  console.error("PRIVATE-SERVICE-BYTE Serving functions on http://127.0.0.1:54321");',
+    '  process.on("SIGTERM", () => process.exit(0));',
+    '  setInterval(() => {}, 1000);',
+    '} else if (args[0] === "supabase-prefix" && args[1] === "status" && args[2] === "-o" && args[3] === "env") {',
     `  if (existsSync(${JSON.stringify(join(root, "nul-status-mode"))})) console.log('API_URL="prefix\\u0000TOPSECRETsuffix"');`,
     '  else console.log(\'API_URL="http://local.test"\');',
     '  console.log(\'ANON_KEY="profile-secret-key"\');',
@@ -48,6 +53,7 @@ before(async () => {
     workingDirectory: ".",
     destructiveDbOps: "yes",
     blockedCommands: [{ prefix: ["db", "diff"], reason: "Use declarative sync" }],
+    functionsServe: { args: ["--fixture-flag"] },
     denoTestEnvironmentProfiles: {
       local: {
         source: "supabaseStatus",
@@ -59,6 +65,7 @@ before(async () => {
   tools = new Map();
   commands = new Map();
   sentMessages = [];
+  eventHandlers = new Map();
   const mockPi = {
     registerTool(tool: any) {
       tools.set(tool.name, tool);
@@ -66,7 +73,9 @@ before(async () => {
     registerCommand(name: string, command: any) {
       commands.set(name, command);
     },
-    on() {},
+    on(name: string, handler: (...args: any[]) => Promise<void>) {
+      eventHandlers.set(name, handler);
+    },
     sendUserMessage(message: string) {
       sentMessages.push(message);
     },
@@ -86,6 +95,12 @@ async function waitForFile(path: string) {
   throw new Error(`Timed out waiting for fixture file: ${path}`);
 }
 
+function exposedError(error: Error): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.getOwnPropertyNames(error).map((name) => [name, (error as unknown as Record<string, unknown>)[name]]),
+  );
+}
+
 function context() {
   return {
     cwd: root,
@@ -100,8 +115,15 @@ function context() {
 
 describe("registered tools", () => {
   test("registers the clean breaking tool names", () => {
-    assert.deepEqual([...tools.keys()], ["supabase_cli", "deno_test", "deno_cache"]);
+    assert.deepEqual([...tools.keys()], [
+      "supabase_functions_serve", "supabase_cli", "deno_test", "deno_cache",
+    ]);
     assert.equal(tools.has("supabase_bash"), false);
+    assert.deepEqual(
+      tools.get("supabase_functions_serve").parameters.properties.action.enum,
+      ["start", "status", "stop"],
+    );
+    assert.equal(tools.get("supabase_functions_serve").parameters.properties.action.type, "string");
   });
 
   test("runs Supabase arguments after the configured prefix", async () => {
@@ -274,6 +296,86 @@ describe("registered tools", () => {
     } finally {
       await Promise.all([mode, ready, output].map((path) => rm(path, { force: true })));
     }
+  });
+
+  test("refuses disabled functions serve startup without spawning or leaking configuration", async () => {
+    const configPath = join(root, ".pi", "supabase-tools.json");
+    const validText = await import("node:fs/promises").then(({ readFile }) => readFile(configPath, "utf-8"));
+    const disabled = JSON.parse(validText);
+    delete disabled.functionsServe;
+    const spawnMarker = join(root, "disabled-functions-serve-spawned");
+    const configSentinel = "PRIVATE-DISABLED-CONFIG-Serving functions on 127.0.0.1";
+    disabled.commands.supabaseCli = [
+      process.execPath,
+      "-e",
+      `require("node:fs").writeFileSync(${JSON.stringify(spawnMarker)}, "spawned")`,
+      configSentinel,
+    ];
+    disabled.environment = {
+      ...(disabled.environment ?? {}),
+      DISABLED_SENTINEL: configSentinel,
+    };
+    await writeFile(configPath, JSON.stringify(disabled), "utf-8");
+    try {
+      await assert.rejects(
+        tools.get("supabase_functions_serve").execute(
+          "call", { action: "start" }, undefined, undefined, context(),
+        ),
+        (error: Error) => {
+          const exposure = exposedError(error);
+          const complete = JSON.stringify({ exposure, enumerable: { ...error }, serialized: JSON.stringify(error) });
+          return (
+            error.message.includes("not_enabled_by_configuration") &&
+            !complete.includes(configSentinel) &&
+            !complete.includes("Serving functions on") &&
+            !complete.includes("127.0.0.1")
+          );
+        },
+      );
+      await assert.rejects(access(spawnMarker));
+    } finally {
+      await writeFile(configPath, validText, "utf-8");
+    }
+  });
+
+  test("manages functions serve without leaking output and survives config mutation", async () => {
+    const tool = tools.get("supabase_functions_serve");
+    const updates: unknown[] = [];
+    const start = await tool.execute(
+      "call", { action: "start" }, undefined, (update: unknown) => updates.push(update), context(),
+    );
+    assert.equal(start.details.phase, "running");
+    assert.equal(updates.length, 0);
+    assert.doesNotMatch(JSON.stringify(start), /PRIVATE-SERVICE-BYTE|127\.0\.0\.1/);
+
+    const configPath = join(root, ".pi", "supabase-tools.json");
+    const valid = await import("node:fs/promises").then(({ readFile }) => readFile(configPath, "utf-8"));
+    await writeFile(configPath, "{ malformed", "utf-8");
+    try {
+      const status = await tool.execute("call", { action: "status" }, undefined, undefined, context());
+      assert.equal(status.details.phase, "running");
+      const stop = await tool.execute("call", { action: "stop" }, undefined, undefined, context());
+      assert.equal(stop.details.phase, "stopped");
+      assert.equal(stop.details.lastExit.cleanup, "confirmed");
+      assert.doesNotMatch(JSON.stringify([status, stop]), /PRIVATE-SERVICE-BYTE|127\.0\.0\.1/);
+    } finally {
+      await writeFile(configPath, valid, "utf-8");
+    }
+  });
+
+  test("refuses untrusted functions serve startup and cleans up on session shutdown", async () => {
+    const tool = tools.get("supabase_functions_serve");
+    await assert.rejects(
+      tool.execute("call", { action: "start" }, undefined, undefined, {
+        ...context(), isProjectTrusted: () => false,
+      }),
+      /project_untrusted/,
+    );
+
+    await tool.execute("call", { action: "start" }, undefined, undefined, context());
+    await eventHandlers.get("session_shutdown")?.({}, context());
+    const status = await tool.execute("call", { action: "status" }, undefined, undefined, context());
+    assert.equal(status.details.phase, "stopped");
   });
 
   test("completes the destructive approval workflow", async () => {
