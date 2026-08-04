@@ -37,6 +37,7 @@ const TOP_LEVEL_KEYS = new Set([
   "stateFile",
   "blockedCommands",
   "denoTestEnvironmentProfiles",
+  "functionsServe",
 ]);
 const COMMAND_KEYS = new Set(["supabaseCli", "denoTest", "denoCache"]);
 
@@ -239,6 +240,20 @@ export function validateConfig(value: unknown, source: string): SupabaseToolsCon
     );
   }
 
+  if (value.functionsServe !== undefined) {
+    if (!isRecord(value.functionsServe)) {
+      throw new ConfigurationError(`${source}.functionsServe must be an object`);
+    }
+    for (const key of Object.keys(value.functionsServe)) {
+      if (key !== "args") {
+        throw new ConfigurationError(`${source}.functionsServe has unknown property '${key}'`);
+      }
+    }
+    config.functionsServe = {
+      args: validateStringArray(value.functionsServe.args, `${source}.functionsServe.args`),
+    };
+  }
+
   return config;
 }
 
@@ -315,6 +330,7 @@ export function mergeConfig(
       globalConfig?.denoTestEnvironmentProfiles ?? {},
       projectConfig?.denoTestEnvironmentProfiles ?? {},
     ),
+    functionsServe: projectConfig?.functionsServe ?? globalConfig?.functionsServe,
     defaultTimeout: DEFAULT_CONFIG.defaultTimeout,
   };
 }

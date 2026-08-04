@@ -20,6 +20,10 @@ export interface DenoTestEnvironmentProfile {
   variables: Record<string, string>;
 }
 
+export interface FunctionsServeConfig {
+  args: string[];
+}
+
 export interface SupabaseToolsConfig {
   pathPrepend?: string[];
   environment?: Record<string, string | null>;
@@ -29,6 +33,7 @@ export interface SupabaseToolsConfig {
   stateFile?: string;
   blockedCommands?: BlockedCommand[];
   denoTestEnvironmentProfiles?: Record<string, DenoTestEnvironmentProfile>;
+  functionsServe?: FunctionsServeConfig;
 }
 
 export interface ResolvedConfig {
@@ -44,6 +49,7 @@ export interface ResolvedConfig {
   stateFile: string;
   blockedCommands: BlockedCommand[];
   denoTestEnvironmentProfiles: Record<string, DenoTestEnvironmentProfile>;
+  functionsServe?: FunctionsServeConfig;
   defaultTimeout: number;
 }
 

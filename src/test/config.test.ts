@@ -51,6 +51,14 @@ describe("configuration validation", () => {
       /non-empty array/,
     );
     assert.throws(
+      () => validateConfig({ functionsServe: {} }, "config.json"),
+      /functionsServe.args/,
+    );
+    assert.throws(
+      () => validateConfig({ functionsServe: { args: [], extra: true } }, "config.json"),
+      /unknown property/,
+    );
+    assert.throws(
       () => validateConfig({ denoTestEnvironmentProfiles: { "bad name": {} } }, "config.json"),
       /profile name/,
     );
@@ -77,6 +85,7 @@ describe("configuration validation", () => {
       destructiveDbOps: "ask",
       stateFile: ".pi/supabase-tools-state.json",
       blockedCommands: [{ prefix: ["db", "diff"], reason: "Use PG-Delta" }],
+      functionsServe: { args: [] },
       denoTestEnvironmentProfiles: {
         local: {
           source: "supabaseStatus",
@@ -101,6 +110,7 @@ describe("configuration discovery and merge", () => {
     assert.deepEqual(config.commands.denoCache, ["deno", "cache"]);
     assert.equal(config.workingDirectory, "supabase");
     assert.equal(config.destructiveDbOps, "ask");
+    assert.equal(config.functionsServe, undefined);
   });
 
   test("project values override global values and additive values preserve order", () => {
@@ -114,6 +124,7 @@ describe("configuration discovery and merge", () => {
       },
       workingDirectory: "global-supabase",
       blockedCommands: [{ prefix: ["db", "diff"], reason: "Global policy" }],
+      functionsServe: { args: ["--global"] },
       denoTestEnvironmentProfiles: {
         inherited: { source: "supabaseStatus", variables: { API_URL: "URL" } },
         replaced: { source: "supabaseStatus", variables: { OLD: "OLD" } },
@@ -125,6 +136,7 @@ describe("configuration discovery and merge", () => {
       commands: { supabaseCli: ["project-supabase"] },
       workingDirectory: "supabase",
       blockedCommands: [{ prefix: ["stop"], reason: "Project policy" }],
+      functionsServe: { args: [] },
       denoTestEnvironmentProfiles: {
         replaced: { source: "supabaseStatus", variables: { NEW: "NEW" } },
       },
@@ -144,6 +156,7 @@ describe("configuration discovery and merge", () => {
     assert.deepEqual(config.commands.denoTest, ["global-deno", "test"]);
     assert.deepEqual(config.commands.denoCache, ["global-deno", "cache"]);
     assert.equal(config.workingDirectory, "supabase");
+    assert.deepEqual(config.functionsServe, { args: [] });
     assert.deepEqual(config.blockedCommands.map((rule) => rule.prefix), [
       ["db", "diff"],
       ["stop"],
